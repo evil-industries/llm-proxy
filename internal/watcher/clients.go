@@ -23,6 +23,13 @@ import (
 )
 
 func (w *Watcher) reloadClients(rescanAuth bool, affectedOAuthProviders []string, forceAuthRefresh bool) {
+	w.configApplyMu.Lock()
+	defer w.configApplyMu.Unlock()
+	w.reloadClientsLocked(rescanAuth, affectedOAuthProviders, forceAuthRefresh)
+}
+
+// reloadClientsLocked expects configApplyMu to protect callback ordering.
+func (w *Watcher) reloadClientsLocked(rescanAuth bool, affectedOAuthProviders []string, forceAuthRefresh bool) {
 	log.Debugf("starting full client load process")
 
 	w.clientsMutex.RLock()
@@ -492,7 +499,7 @@ func (w *Watcher) triggerServerUpdate(cfg *config.Config) {
 		}
 		w.serverUpdatePend = false
 		w.serverUpdateMu.Unlock()
-		w.reloadCallback(cfg)
+		w.reloadLatestConfig(cfg)
 		return
 	}
 
@@ -515,10 +522,6 @@ func (w *Watcher) triggerServerUpdate(cfg *config.Config) {
 		if w.stopped.Load() {
 			return
 		}
-		w.clientsMutex.RLock()
-		latestCfg := w.config
-		w.clientsMutex.RUnlock()
-
 		w.serverUpdateMu.Lock()
 		if w.serverUpdateTimer != timer || !w.serverUpdatePend {
 			w.serverUpdateMu.Unlock()
@@ -526,15 +529,31 @@ func (w *Watcher) triggerServerUpdate(cfg *config.Config) {
 		}
 		w.serverUpdateTimer = nil
 		w.serverUpdatePend = false
-		if latestCfg == nil || w.reloadCallback == nil || w.stopped.Load() {
+		if w.reloadCallback == nil || w.stopped.Load() {
 			w.serverUpdateMu.Unlock()
 			return
 		}
 
 		w.serverUpdateLast = time.Now()
 		w.serverUpdateMu.Unlock()
-		w.reloadCallback(latestCfg)
+		w.reloadLatestConfig(nil)
 	})
 	w.serverUpdateTimer = timer
 	w.serverUpdateMu.Unlock()
+}
+
+// reloadLatestConfig captures the current config only after older callbacks finish.
+// The fallback supports an initial update before SetConfig has populated the cache.
+func (w *Watcher) reloadLatestConfig(fallback *config.Config) {
+	w.configApplyMu.Lock()
+	defer w.configApplyMu.Unlock()
+	w.clientsMutex.RLock()
+	cfg := w.config
+	w.clientsMutex.RUnlock()
+	if cfg == nil {
+		cfg = fallback
+	}
+	if cfg != nil && w.reloadCallback != nil && !w.stopped.Load() {
+		w.reloadCallback(cfg)
+	}
 }

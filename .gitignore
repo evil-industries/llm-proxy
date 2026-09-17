@@ -66,3 +66,7 @@ docker-compose.override.yml
 
 # Local LLM Wiki vault
 .llm-wiki
+
+# Browser inspection artifacts
+/.playwright-cli/
+/output/playwright/

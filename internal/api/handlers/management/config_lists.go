@@ -47,7 +47,7 @@ func rejectInvalidFingerprintProfile(c *gin.Context, field, profile string) bool
 	return false
 }
 
-// Generic helpers for list[string]
+// Generic helpers for list[string]. Callers must hold h.mu.
 func (h *Handler) putStringList(c *gin.Context, set func([]string), after func()) {
 	data, err := c.GetRawData()
 	if err != nil {
@@ -69,7 +69,7 @@ func (h *Handler) putStringList(c *gin.Context, set func([]string), after func()
 	if after != nil {
 		after()
 	}
-	h.persist(c)
+	h.persistLocked(c)
 }
 
 func (h *Handler) patchStringList(c *gin.Context, target *[]string, after func()) {
@@ -88,7 +88,7 @@ func (h *Handler) patchStringList(c *gin.Context, target *[]string, after func()
 		if after != nil {
 			after()
 		}
-		h.persist(c)
+		h.persistLocked(c)
 		return
 	}
 	if body.Old != nil && body.New != nil {
@@ -98,7 +98,7 @@ func (h *Handler) patchStringList(c *gin.Context, target *[]string, after func()
 				if after != nil {
 					after()
 				}
-				h.persist(c)
+				h.persistLocked(c)
 				return
 			}
 		}
@@ -106,7 +106,7 @@ func (h *Handler) patchStringList(c *gin.Context, target *[]string, after func()
 		if after != nil {
 			after()
 		}
-		h.persist(c)
+		h.persistLocked(c)
 		return
 	}
 	c.JSON(400, gin.H{"error": "missing fields"})
@@ -121,7 +121,7 @@ func (h *Handler) deleteFromStringList(c *gin.Context, target *[]string, after f
 			if after != nil {
 				after()
 			}
-			h.persist(c)
+			h.persistLocked(c)
 			return
 		}
 	}
@@ -136,23 +136,39 @@ func (h *Handler) deleteFromStringList(c *gin.Context, target *[]string, after f
 		if after != nil {
 			after()
 		}
-		h.persist(c)
+		h.persistLocked(c)
 		return
 	}
 	c.JSON(400, gin.H{"error": "missing index or value"})
 }
 
 // api-keys
-func (h *Handler) GetAPIKeys(c *gin.Context) { c.JSON(200, gin.H{"api-keys": h.cfg.APIKeys}) }
+func (h *Handler) GetAPIKeys(c *gin.Context) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	c.JSON(200, gin.H{"api-keys": h.cfg.APIKeys})
+}
 func (h *Handler) PutAPIKeys(c *gin.Context) {
+	h.reloadMu.Lock()
+	defer h.reloadMu.Unlock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.putStringList(c, func(v []string) {
 		h.cfg.APIKeys = append([]string(nil), v...)
 	}, nil)
 }
 func (h *Handler) PatchAPIKeys(c *gin.Context) {
+	h.reloadMu.Lock()
+	defer h.reloadMu.Unlock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.patchStringList(c, &h.cfg.APIKeys, func() {})
 }
 func (h *Handler) DeleteAPIKeys(c *gin.Context) {
+	h.reloadMu.Lock()
+	defer h.reloadMu.Unlock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.deleteFromStringList(c, &h.cfg.APIKeys, func() {})
 }
 

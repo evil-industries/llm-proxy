@@ -1,0 +1,16 @@
+node_modules
+.svelte-kit
+build
+coverage
+test-results
+playwright-report
+.git
+.env
+.env.*
+*.log
+.DS_Store
+.garden
+.garden-dist
+.playwright-cli
+.vitest-attachments
+output

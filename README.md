@@ -130,6 +130,10 @@ CLIProxyAPI Guides: [https://help.router-for.me/](https://help.router-for.me/)
 
 see [MANAGEMENT_API.md](https://help.router-for.me/management/api)
 
+### SvelteKit management console
+
+The [`frontend/`](frontend/README.md) console provides credential management, client API keys, request charts, routing settings, and server logs. It uses shadcn-svelte, includes GardenJS stories for every component, and runs Vitest browser tests for responsive layouts and accessibility. Its authenticated Node server keeps the backend management key private. See its README for development, testing, and self-hosting with Node or Docker behind HTTPS.
+
 ## Usage Statistics
 
 Since v6.10.0, CLIProxyAPI and [CPAMC](https://github.com/router-for-me/Cli-Proxy-API-Management-Center) no longer ship built-in usage statistics. If you need usage statistics, use:

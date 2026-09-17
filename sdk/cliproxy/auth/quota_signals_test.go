@@ -683,3 +683,38 @@ func TestObserveResponseHeadersKeepsPrimaryWhenTruncatingAdditional(t *testing.T
 		t.Fatalf("snapshot size = %d, want %d", len(quota.Signals), maxQuotaSignalHeaders)
 	}
 }
+
+func TestObserveBankedResetCountValidatesAndKeepsZero(t *testing.T) {
+	for _, tc := range []struct{ value, want string }{
+		{"2", "2"}, {"0", "0"}, {" 2 ", "2"}, {"002", "2"},
+		{"", ""}, {"null", ""}, {"true", ""}, {"-1", ""},
+		{"1.5", ""}, {"2.0", ""}, {"2e1", ""}, {"+1", ""},
+		{"9223372036854775808", ""},
+	} {
+		var quota QuotaState
+		changed := quota.ObserveResponseHeadersForProvider("codex", http.Header{codexResetCreditsCountHeader: []string{tc.value}}, time.Unix(100, 0))
+		if got := quota.Signals[codexResetCreditsCountHeader]; got != tc.want || changed != (tc.want != "") {
+			t.Fatalf("value %q: count=%q changed=%v, want %q", tc.value, got, changed, tc.want)
+		}
+	}
+	var claude QuotaState
+	if claude.ObserveResponseHeadersForProvider("claude", http.Header{codexResetCreditsCountHeader: []string{"2"}}, time.Unix(100, 0)) {
+		t.Fatal("Codex reset credit signal accepted for another provider")
+	}
+}
+
+func TestObserveBankedResetCountSurvivesAdditionalWindowTruncation(t *testing.T) {
+	headers := make(http.Header)
+	headers.Set(codexResetCreditsCountHeader, "2")
+	for i := range maxQuotaSignalHeaders * 2 {
+		headers.Set(fmt.Sprintf("X-Codex-Additional-%d-Primary-Used-Percent", i), "99")
+	}
+	var quota QuotaState
+	quota.ObserveResponseHeadersForProvider("codex", headers, time.Unix(100, 0))
+	if quota.Signals[codexResetCreditsCountHeader] != "2" {
+		t.Fatal("banked reset count was dropped before additional quota windows")
+	}
+	if len(quota.Signals) != maxQuotaSignalHeaders {
+		t.Fatalf("signals = %d, want %d", len(quota.Signals), maxQuotaSignalHeaders)
+	}
+}

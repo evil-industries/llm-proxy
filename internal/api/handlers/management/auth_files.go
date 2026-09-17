@@ -329,9 +329,8 @@ func (h *Handler) buildAuthFileEntryLocked(auth *coreauth.Auth, quotaSupported .
 	}
 	auth.EnsureIndex()
 	runtimeOnly := isRuntimeOnlyAuth(auth)
-	if runtimeOnly && (auth.Disabled || auth.Status == coreauth.StatusDisabled) {
-		return nil
-	}
+	// Disabled runtime credentials must remain visible so operators can re-enable them.
+	// Disconnected runtime credentials are removed from the manager by their owner.
 	path := strings.TrimSpace(authAttribute(auth, "path"))
 	if path == "" && !runtimeOnly {
 		return nil

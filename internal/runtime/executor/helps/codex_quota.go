@@ -2,6 +2,7 @@ package helps
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/tidwall/gjson"
@@ -11,6 +12,7 @@ const (
 	codexRateLimitsEventType      = "codex.rate_limits"
 	codexQuotaAdditionalHeaderKey = "X-Codex-Additional-"
 	maxCodexAdditionalRateLimits  = 8
+	codexResetCreditsCountHeader  = "X-Codex-Rate-Limit-Reset-Credits-Available-Count"
 )
 
 // ParseCodexQuotaEventHeaders converts one Codex websocket quota event into the
@@ -96,6 +98,19 @@ func ParseCodexQuotaEventHeaders(payload []byte) http.Header {
 		hasQuotaData = setCodexQuotaScalarHeader(headers, "X-Codex-Credits-Has-Credits", credits, "has_credits", "hasCredits") || hasQuotaData
 		hasQuotaData = setCodexQuotaScalarHeader(headers, "X-Codex-Credits-Unlimited", credits, "unlimited") || hasQuotaData
 		hasQuotaData = setCodexQuotaScalarHeader(headers, "X-Codex-Credits-Balance", credits, "balance") || hasQuotaData
+	}
+	// App-server quota snapshots define this count separately from monetary
+	// credits. Preserve it when supplied in a quota frame, without inferring it
+	// from the optional/capped credit details or ordinary credits.balance.
+	resetCredits := firstCodexQuotaResult(root, "rate_limit_reset_credits", "rateLimitResetCredits")
+	if resetCredits.IsObject() {
+		count := firstCodexQuotaResult(resetCredits, "available_count", "availableCount")
+		if count.Type == gjson.Number && gjson.ValidBytes(payload) {
+			if normalized, ok := normalizedCodexResetCreditCount(count.Raw); ok {
+				headers.Set(codexResetCreditsCountHeader, normalized)
+				hasQuotaData = true
+			}
+		}
 	}
 
 	if !hasQuotaData {
@@ -217,6 +232,18 @@ func parseCodexQuotaHeadersObject(headersNode gjson.Result) http.Header {
 		if !isCodexQuotaHeaderName(name) {
 			return true
 		}
+		if name == codexResetCreditsCountHeader {
+			if value.Type == gjson.Number || value.Type == gjson.String {
+				raw := value.String()
+				if value.Type == gjson.Number {
+					raw = value.Raw
+				}
+				if normalized, ok := normalizedCodexResetCreditCount(raw); ok {
+					headers.Set(name, normalized)
+				}
+			}
+			return true
+		}
 		if raw := codexQuotaScalarValue(value); raw != "" {
 			headers.Set(name, raw)
 		}
@@ -234,6 +261,7 @@ func isCodexQuotaHeaderName(name string) bool {
 		return true
 	}
 	if lower == "x-codex-active-limit" || lower == "x-codex-plan-type" ||
+		lower == strings.ToLower(codexResetCreditsCountHeader) ||
 		strings.HasPrefix(lower, "x-codex-credits-") {
 		return true
 	}
@@ -255,6 +283,23 @@ func isCodexQuotaHeaderName(name string) bool {
 		}
 	}
 	return false
+}
+
+func normalizedCodexResetCreditCount(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", false
+	}
+	for _, char := range raw {
+		if char < '0' || char > '9' {
+			return "", false
+		}
+	}
+	count, errParse := strconv.ParseUint(raw, 10, 63)
+	if errParse != nil {
+		return "", false
+	}
+	return strconv.FormatUint(count, 10), true
 }
 
 func setCodexQuotaScalarHeader(headers http.Header, name string, object gjson.Result, paths ...string) bool {

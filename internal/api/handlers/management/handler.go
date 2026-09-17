@@ -61,6 +61,7 @@ type Handler struct {
 	pluginStoreHTTPClient   pluginstore.HTTPDoer
 	pluginStoreRateLimiter  *pluginstore.GitHubRateLimiter
 	pluginReleases          pluginReleaseCache
+	notifications           NotificationService
 }
 
 type configReloadSnapshot struct {
@@ -192,7 +193,11 @@ func (h *Handler) reloadConfigAfterManagementSave(ctx context.Context, snapshot 
 	}
 	h.reloadMu.Lock()
 	defer h.reloadMu.Unlock()
+	h.reloadConfigAfterManagementSaveLocked(ctx, snapshot)
+}
 
+// reloadConfigAfterManagementSaveLocked expects the caller to hold h.reloadMu.
+func (h *Handler) reloadConfigAfterManagementSaveLocked(ctx context.Context, snapshot configReloadSnapshot) {
 	h.mu.Lock()
 	if snapshot.generation < h.appliedReloadGeneration {
 		h.mu.Unlock()

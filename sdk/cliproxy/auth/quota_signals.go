@@ -3,13 +3,15 @@ package auth
 import (
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
 
 const (
-	maxQuotaSignalHeaders = 64
-	maxQuotaSignalValue   = 512
+	maxQuotaSignalHeaders        = 64
+	maxQuotaSignalValue          = 512
+	codexResetCreditsCountHeader = "X-Codex-Rate-Limit-Reset-Credits-Available-Count"
 )
 
 // ProviderSupportsQuotaObservation reports whether the named provider emits a
@@ -104,6 +106,13 @@ func collectQuotaSignals(provider string, headers http.Header) map[string]string
 		if !validQuotaSignalValue(value) {
 			continue
 		}
+		if canonicalKey == codexResetCreditsCountHeader {
+			count, ok := normalizedResetCreditCount(value)
+			if !ok {
+				continue
+			}
+			value = count
+		}
 		if _, exists := values[canonicalKey]; !exists {
 			names = append(names, canonicalKey)
 		}
@@ -153,6 +162,8 @@ func quotaSignalRetentionRank(name string) int {
 		return 0
 	case lower == "x-codex-plan-type", lower == "x-codex-active-limit", strings.HasPrefix(lower, "x-codex-credits-"):
 		return 1
+	case lower == strings.ToLower(codexResetCreditsCountHeader):
+		return 1
 	case lower == "x-codex-allowed", lower == "x-codex-limit-reached",
 		strings.HasPrefix(lower, "x-codex-primary-"), strings.HasPrefix(lower, "x-codex-secondary-"):
 		return 2
@@ -190,6 +201,7 @@ func isQuotaSignalHeaderForProvider(provider, name string) bool {
 		return false
 	}
 	if name == "x-codex-active-limit" || name == "x-codex-plan-type" ||
+		name == strings.ToLower(codexResetCreditsCountHeader) ||
 		strings.HasPrefix(name, "x-codex-credits-") {
 		return true
 	}
@@ -212,6 +224,22 @@ func isQuotaSignalHeaderForProvider(provider, name string) bool {
 		}
 	}
 	return false
+}
+
+func normalizedResetCreditCount(value string) (string, bool) {
+	if value == "" {
+		return "", false
+	}
+	for _, char := range value {
+		if char < '0' || char > '9' {
+			return "", false
+		}
+	}
+	count, errParse := strconv.ParseUint(value, 10, 63)
+	if errParse != nil {
+		return "", false
+	}
+	return strconv.FormatUint(count, 10), true
 }
 
 // mergeQuotaObservation keeps the newest observation snapshot instead of
