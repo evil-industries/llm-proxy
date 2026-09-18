@@ -98,7 +98,7 @@
       />
       <p class="muted">Use this key as the bearer token in your client.</p>
     </div>
-    <Button type="submit" disabled={disabled || busy || !newKey.trim()}
+    <Button variant="constructive" type="submit" disabled={disabled || busy || !newKey.trim()}
       ><Plus size={15} /> {busy ? 'Saving…' : 'Add key'}</Button
     >
   </form>
@@ -141,7 +141,7 @@
               aria-label={`Copy key ${index + 1}`}
               onclick={() => copyKey(key)}><Copy size={15} /></Button
             ><Button
-              variant="ghost"
+              variant="destructive"
               size="icon"
               disabled={disabled || busy || !canRemove(key)}
               aria-label={`Delete key ${index + 1}`}
@@ -222,17 +222,6 @@
     font-size: 13px;
     overflow-wrap: anywhere;
     white-space: normal;
-  }
-  .delete-confirmation {
-    flex-basis: 100%;
-    padding: 14px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--muted);
-  }
-  .delete-confirmation p {
-    overflow-wrap: anywhere;
-    margin-bottom: 12px;
   }
   @media (max-width: 480px) {
     .add-key-form,

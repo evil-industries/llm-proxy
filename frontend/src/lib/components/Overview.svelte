@@ -30,22 +30,22 @@
 
 <div class="overview">
   <div class="metrics">
-    <div class="panel metric">
+    <div class="metric">
       <p class="muted">Credential requests</p>
       <strong>{number(requests)}</strong>
       <p class="metric-note muted">Recorded by connected credentials</p>
     </div>
-    <div class="panel metric">
+    <div class="metric">
       <p class="muted">Success rate</p>
       <strong>{requests ? `${((1 - failures / requests) * 100).toFixed(1)}%` : '—'}</strong>
       <p class="metric-note muted">{number(failures)} failed requests</p>
     </div>
-    <div class="panel metric">
+    <div class="metric">
       <p class="muted">Enabled credentials</p>
       <strong>{active}<span class="muted"> / {files.length}</span></strong>
       <p class="metric-note muted">Across {providers.length} providers</p>
     </div>
-    <div class="panel metric">
+    <div class="metric">
       <p class="muted">Client API keys</p>
       <strong>{keyCount}</strong>
       <p class="metric-note muted">Keys authorized to use this proxy</p>
@@ -110,23 +110,24 @@
 <style>
   .overview {
     display: grid;
-    gap: 24px;
+    gap: 32px;
   }
   .metrics {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
-    gap: 16px;
+    gap: 24px 32px;
+    padding-block: 4px 32px;
+    border-bottom: 1px solid var(--border);
   }
   .metric {
     overflow-wrap: anywhere;
-    padding: 21px 23px;
     display: grid;
-    gap: 14px;
+    gap: 10px;
   }
   .metric strong {
-    font-size: 30px;
+    font-size: 34px;
     line-height: 1.2;
-    font-weight: 550;
+    font-weight: 600;
     letter-spacing: -1px;
   }
   .metric strong span {
@@ -154,8 +155,7 @@
     padding: 7px;
     display: grid;
     place-items: center;
-    border: 1px solid #e5e5e5;
-    border-radius: 8px;
+    color: var(--trust);
     font-weight: 600;
     flex-shrink: 0;
   }
@@ -200,7 +200,7 @@
 
   @media (max-width: 640px) {
     .metric {
-      padding: 18px;
+      padding: 0;
     }
     .metric strong {
       font-size: 26px;

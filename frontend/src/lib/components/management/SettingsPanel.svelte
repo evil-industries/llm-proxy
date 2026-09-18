@@ -122,7 +122,7 @@
           >Weighted round robin</option
         ><option value="fill-first">Fill first</option></select
       ><Button
-        variant="outline"
+        variant="constructive"
         disabled={disabled ||
           busy !== null ||
           routing === (data.routing?.strategy ?? 'round-robin')}
@@ -154,7 +154,7 @@
           bind:checked={values[setting.key]}
           disabled={disabled || busy !== null}
         /><Button
-          variant="outline"
+          variant="constructive"
           disabled={disabled ||
             busy !== null ||
             values[setting.key] === (data[setting.key] === true)}
