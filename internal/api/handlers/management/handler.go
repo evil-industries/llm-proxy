@@ -61,6 +61,13 @@ type Handler struct {
 	pluginStoreHTTPClient   pluginstore.HTTPDoer
 	pluginStoreRateLimiter  *pluginstore.GitHubRateLimiter
 	pluginReleases          pluginReleaseCache
+	notifications           NotificationService
+	deviceFlowsMu           sync.Mutex
+	deviceAuthClosed        bool
+	deviceAuthStarts        map[string]context.CancelFunc
+	deviceFlows             map[string]*codexDeviceFlow
+	deviceAuthWorkers       map[*codexDeviceFlow]struct{}
+	deviceAuthFactory       func(*config.Config) codexDeviceService
 }
 
 type configReloadSnapshot struct {
@@ -131,6 +138,17 @@ func (h *Handler) SetConfig(cfg *config.Config) {
 	h.mu.Unlock()
 }
 
+// configSnapshot gives readers an independent view while configuration is replaced
+// or modified. Callers must not already hold h.mu.
+func (h *Handler) configSnapshot() *config.Config {
+	if h == nil {
+		return nil
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.cfg.CloneForRuntime()
+}
+
 // SetAuthManager updates the auth manager reference used by management endpoints.
 func (h *Handler) SetAuthManager(manager *coreauth.Manager) {
 	if h == nil {
@@ -139,6 +157,15 @@ func (h *Handler) SetAuthManager(manager *coreauth.Manager) {
 	h.mu.Lock()
 	h.authManager = manager
 	h.mu.Unlock()
+}
+
+func (h *Handler) authManagerSnapshot() *coreauth.Manager {
+	if h == nil {
+		return nil
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.authManager
 }
 
 // SetPluginHost updates the plugin host used by plugin-backed management endpoints.
@@ -192,7 +219,11 @@ func (h *Handler) reloadConfigAfterManagementSave(ctx context.Context, snapshot 
 	}
 	h.reloadMu.Lock()
 	defer h.reloadMu.Unlock()
+	h.reloadConfigAfterManagementSaveLocked(ctx, snapshot)
+}
 
+// reloadConfigAfterManagementSaveLocked expects the caller to hold h.reloadMu.
+func (h *Handler) reloadConfigAfterManagementSaveLocked(ctx context.Context, snapshot configReloadSnapshot) {
 	h.mu.Lock()
 	if snapshot.generation < h.appliedReloadGeneration {
 		h.mu.Unlock()
@@ -235,7 +266,11 @@ func (h *Handler) reloadConfigAfterManagementSaveAsync(ctx context.Context, snap
 }
 
 // SetLocalPassword configures the runtime-local password accepted for localhost requests.
-func (h *Handler) SetLocalPassword(password string) { h.localPassword = password }
+func (h *Handler) SetLocalPassword(password string) {
+	h.mu.Lock()
+	h.localPassword = password
+	h.mu.Unlock()
+}
 
 // SetLogDirectory updates the directory where main.log should be looked up.
 func (h *Handler) SetLogDirectory(dir string) {
@@ -247,7 +282,9 @@ func (h *Handler) SetLogDirectory(dir string) {
 			dir = abs
 		}
 	}
+	h.mu.Lock()
 	h.logDir = dir
+	h.mu.Unlock()
 }
 
 // SetPostAuthHook registers a hook to be called after auth record creation but before persistence.
@@ -306,6 +343,7 @@ func (h *Handler) AuthenticateManagementKey(clientIP string, localClient bool, p
 		return false, http.StatusForbidden, "remote management disabled"
 	}
 
+	h.mu.Lock()
 	cfg := h.cfg
 	var (
 		allowRemote bool
@@ -315,10 +353,11 @@ func (h *Handler) AuthenticateManagementKey(clientIP string, localClient bool, p
 		allowRemote = cfg.RemoteManagement.AllowRemote
 		secretHash = cfg.RemoteManagement.SecretKey
 	}
-	if h.allowRemoteOverride {
+	allowRemoteOverride, envSecret, localPassword := h.allowRemoteOverride, h.envSecret, h.localPassword
+	h.mu.Unlock()
+	if allowRemoteOverride {
 		allowRemote = true
 	}
-	envSecret := h.envSecret
 
 	now := time.Now()
 	h.attemptsMu.Lock()
@@ -374,7 +413,7 @@ func (h *Handler) AuthenticateManagementKey(clientIP string, localClient bool, p
 	}
 
 	if localClient {
-		if lp := h.localPassword; lp != "" {
+		if lp := localPassword; lp != "" {
 			if subtle.ConstantTimeCompare([]byte(provided), []byte(lp)) == 1 {
 				reset()
 				return true, 0, ""
@@ -423,6 +462,23 @@ func (h *Handler) persistLocked(c *gin.Context) bool {
 }
 
 // Helper methods for simple types
+func (h *Handler) mutateConfig(c *gin.Context, change func()) {
+	h.reloadMu.Lock()
+	defer h.reloadMu.Unlock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.cfg == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "configuration unavailable"})
+		return
+	}
+	previous := h.cfg
+	h.cfg = previous.CloneForRuntime()
+	change()
+	if !h.persistLocked(c) {
+		h.cfg = previous
+	}
+}
+
 func (h *Handler) updateBoolField(c *gin.Context, set func(bool)) {
 	var body struct {
 		Value *bool `json:"value"`
@@ -431,8 +487,7 @@ func (h *Handler) updateBoolField(c *gin.Context, set func(bool)) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 		return
 	}
-	set(*body.Value)
-	h.persist(c)
+	h.mutateConfig(c, func() { set(*body.Value) })
 }
 
 func (h *Handler) updateIntField(c *gin.Context, set func(int)) {
@@ -443,8 +498,7 @@ func (h *Handler) updateIntField(c *gin.Context, set func(int)) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 		return
 	}
-	set(*body.Value)
-	h.persist(c)
+	h.mutateConfig(c, func() { set(*body.Value) })
 }
 
 func (h *Handler) updateStringField(c *gin.Context, set func(string)) {
@@ -455,6 +509,5 @@ func (h *Handler) updateStringField(c *gin.Context, set func(string)) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 		return
 	}
-	set(*body.Value)
-	h.persist(c)
+	h.mutateConfig(c, func() { set(*body.Value) })
 }

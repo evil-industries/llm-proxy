@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type endpointKey struct{}
@@ -26,8 +27,10 @@ type responseStatusHolder struct {
 }
 
 type responseHeadersHolder struct {
-	mu      sync.RWMutex
-	headers http.Header
+	mu                 sync.RWMutex
+	headers            http.Header
+	observationHeaders http.Header
+	observedAt         time.Time
 }
 
 func WithEndpoint(ctx context.Context, endpoint string) context.Context {
@@ -109,6 +112,12 @@ func SetResponseStatus(ctx context.Context, status int) {
 }
 
 func SetResponseHeaders(ctx context.Context, headers http.Header) {
+	SetResponseHeadersAt(ctx, headers, time.Now())
+}
+
+// SetResponseHeadersAt records when response headers arrived, independently of
+// when a potentially long-running upstream request eventually completes.
+func SetResponseHeadersAt(ctx context.Context, headers http.Header, observedAt time.Time) {
 	if ctx == nil {
 		return
 	}
@@ -119,11 +128,23 @@ func SetResponseHeaders(ctx context.Context, headers http.Header) {
 	holder.mu.Lock()
 	defer holder.mu.Unlock()
 	holder.headers = cloneHTTPHeader(headers)
+	holder.observationHeaders = cloneHTTPHeader(headers)
+	holder.observedAt = observedAt
 }
 
 // MergeResponseHeaders adds headers observed after the initial HTTP response,
 // such as quota metadata delivered in a websocket event.
 func MergeResponseHeaders(ctx context.Context, headers http.Header) {
+	if len(headers) == 0 {
+		return
+	}
+	MergeResponseHeadersAt(ctx, headers, time.Now())
+}
+
+// MergeResponseHeadersAt retains merged headers for logging, while the latest
+// event remains a separate observation. An omitted watermark in a later event
+// must not inherit the later event's timestamp and appear fresh again.
+func MergeResponseHeadersAt(ctx context.Context, headers http.Header, observedAt time.Time) {
 	if ctx == nil || len(headers) == 0 {
 		return
 	}
@@ -133,6 +154,11 @@ func MergeResponseHeaders(ctx context.Context, headers http.Header) {
 	}
 	holder.mu.Lock()
 	defer holder.mu.Unlock()
+	if !holder.observedAt.IsZero() && observedAt.Before(holder.observedAt) {
+		return
+	}
+	holder.observationHeaders = cloneHTTPHeader(headers)
+	holder.observedAt = observedAt
 	if holder.headers == nil {
 		holder.headers = make(http.Header, len(headers))
 	}
@@ -143,6 +169,21 @@ func MergeResponseHeaders(ctx context.Context, headers http.Header) {
 		}
 		holder.headers[canonicalKey] = append([]string(nil), values...)
 	}
+}
+
+// GetResponseObservation returns one coherent capture-time snapshot for quota
+// consumers. GetResponseHeaders remains the merged view used by request logs.
+func GetResponseObservation(ctx context.Context) (http.Header, time.Time) {
+	if ctx == nil {
+		return nil, time.Time{}
+	}
+	holder, ok := ctx.Value(responseHeadersKey{}).(*responseHeadersHolder)
+	if !ok || holder == nil {
+		return nil, time.Time{}
+	}
+	holder.mu.RLock()
+	defer holder.mu.RUnlock()
+	return cloneHTTPHeader(holder.observationHeaders), holder.observedAt
 }
 
 func GetResponseStatus(ctx context.Context) int {

@@ -49,6 +49,8 @@ func (w *Watcher) ReloadConfigIfChanged() {
 }
 
 func (w *Watcher) reloadConfigIfChanged() {
+	w.configApplyMu.Lock()
+	defer w.configApplyMu.Unlock()
 	data, err := os.ReadFile(w.configPath)
 	if err != nil {
 		log.Errorf("failed to read config file for hash check: %v", err)
@@ -70,22 +72,24 @@ func (w *Watcher) reloadConfigIfChanged() {
 		return
 	}
 	log.Infof("config file changed, reloading: %s", w.configPath)
-	if w.reloadConfig() {
-		finalHash := newHash
-		if updatedData, errRead := os.ReadFile(w.configPath); errRead == nil && len(updatedData) > 0 {
-			sumUpdated := sha256.Sum256(updatedData)
-			finalHash = hex.EncodeToString(sumUpdated[:])
-		} else if errRead != nil {
-			log.WithError(errRead).Debug("failed to compute updated config hash after reload")
-		}
+	if w.reloadConfigLocked() {
+		// A management write may complete while the callback runs. Do not mark
+		// that newer disk content as applied; its waiting reload must still run.
 		w.clientsMutex.Lock()
-		w.lastConfigHash = finalHash
+		w.lastConfigHash = newHash
 		w.clientsMutex.Unlock()
 		w.persistConfigAsync()
 	}
 }
 
 func (w *Watcher) reloadConfig() bool {
+	w.configApplyMu.Lock()
+	defer w.configApplyMu.Unlock()
+	return w.reloadConfigLocked()
+}
+
+// reloadConfigLocked expects configApplyMu to cover both the read and callback.
+func (w *Watcher) reloadConfigLocked() bool {
 	log.Debug("=========================== CONFIG RELOAD ============================")
 	log.Debugf("starting config reload from: %s", w.configPath)
 
@@ -139,6 +143,6 @@ func (w *Watcher) reloadConfig() bool {
 	forceAuthRefresh := oldConfig != nil && (oldConfig.ForceModelPrefix != newConfig.ForceModelPrefix || !reflect.DeepEqual(oldConfig.OAuthModelAlias, newConfig.OAuthModelAlias) || retryConfigChanged)
 
 	log.Infof("config successfully reloaded, triggering client reload")
-	w.reloadClients(authDirChanged, affectedOAuthProviders, forceAuthRefresh)
+	w.reloadClientsLocked(authDirChanged, affectedOAuthProviders, forceAuthRefresh)
 	return true
 }

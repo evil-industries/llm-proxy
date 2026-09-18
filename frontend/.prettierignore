@@ -1,0 +1,10 @@
+node_modules
+.svelte-kit
+.garden
+build
+coverage
+test-results
+package-lock.json
+.playwright-cli
+.vitest-attachments
+output

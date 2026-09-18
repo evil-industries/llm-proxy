@@ -38,15 +38,17 @@ const (
 // points at the latest complete log boundary; combining after with limit is
 // therefore tail semantics and does not replay lines trimmed by limit.
 func (h *Handler) GetLogs(c *gin.Context) {
+	cfg := h.configSnapshot()
+
 	if h == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "handler unavailable"})
 		return
 	}
-	if h.cfg == nil {
+	if cfg == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "configuration unavailable"})
 		return
 	}
-	if !h.cfg.LoggingToFile {
+	if !cfg.LoggingToFile {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "logging to file disabled"})
 		return
 	}
@@ -133,15 +135,17 @@ func (h *Handler) GetLogs(c *gin.Context) {
 
 // DeleteLogs removes all rotated log files and truncates the active log.
 func (h *Handler) DeleteLogs(c *gin.Context) {
+	cfg := h.configSnapshot()
+
 	if h == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "handler unavailable"})
 		return
 	}
-	if h.cfg == nil {
+	if cfg == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "configuration unavailable"})
 		return
 	}
-	if !h.cfg.LoggingToFile {
+	if !cfg.LoggingToFile {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "logging to file disabled"})
 		return
 	}
@@ -195,15 +199,17 @@ func (h *Handler) DeleteLogs(c *gin.Context) {
 // GetRequestErrorLogs lists error request log files when RequestLog is disabled.
 // It returns an empty list when RequestLog is enabled.
 func (h *Handler) GetRequestErrorLogs(c *gin.Context) {
+	cfg := h.configSnapshot()
+
 	if h == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "handler unavailable"})
 		return
 	}
-	if h.cfg == nil {
+	if cfg == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "configuration unavailable"})
 		return
 	}
-	if h.cfg.RequestLog {
+	if cfg.RequestLog {
 		c.JSON(http.StatusOK, gin.H{"files": []any{}})
 		return
 	}
@@ -259,11 +265,13 @@ func (h *Handler) GetRequestErrorLogs(c *gin.Context) {
 // GetRequestLogByID finds and downloads a request log file by its request ID.
 // The ID is matched against the suffix of log file names (format: *-{requestID}.log).
 func (h *Handler) GetRequestLogByID(c *gin.Context) {
+	cfg := h.configSnapshot()
+
 	if h == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "handler unavailable"})
 		return
 	}
-	if h.cfg == nil {
+	if cfg == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "configuration unavailable"})
 		return
 	}
@@ -346,11 +354,13 @@ func (h *Handler) GetRequestLogByID(c *gin.Context) {
 
 // DownloadRequestErrorLog downloads a specific error request log file by name.
 func (h *Handler) DownloadRequestErrorLog(c *gin.Context) {
+	cfg := h.configSnapshot()
+
 	if h == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "handler unavailable"})
 		return
 	}
-	if h.cfg == nil {
+	if cfg == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "configuration unavailable"})
 		return
 	}
@@ -401,13 +411,18 @@ func (h *Handler) DownloadRequestErrorLog(c *gin.Context) {
 }
 
 func (h *Handler) logDirectory() string {
+	cfg := h.configSnapshot()
+
 	if h == nil {
 		return ""
 	}
-	if h.logDir != "" {
-		return h.logDir
+	h.mu.Lock()
+	logDir := h.logDir
+	h.mu.Unlock()
+	if logDir != "" {
+		return logDir
 	}
-	return logging.ResolveLogDirectory(h.cfg)
+	return logging.ResolveLogDirectory(cfg)
 }
 
 func (h *Handler) collectLogFiles(dir string) ([]string, error) {

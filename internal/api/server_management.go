@@ -31,6 +31,9 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.GET("/config.yaml", s.mgmt.GetConfigYAML)
 		mgmt.PUT("/config.yaml", s.mgmt.PutConfigYAML)
 		mgmt.GET("/latest-version", s.mgmt.GetLatestVersion)
+		mgmt.GET("/notifications", s.mgmt.GetNotifications)
+		mgmt.PUT("/notifications", s.mgmt.PutNotifications)
+		mgmt.POST("/notifications/test", s.mgmt.TestNotifications)
 		mgmt.GET("/plugins", s.mgmt.ListPlugins)
 		mgmt.GET("/plugin-store", s.mgmt.ListPluginStore)
 		mgmt.POST("/plugin-store/:id/install", s.mgmt.InstallPluginFromStore)
@@ -85,6 +88,7 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.POST("/quota/reset", s.mgmt.ResetCredentialQuota)
 
 		mgmt.GET("/api-keys", s.mgmt.GetAPIKeys)
+		mgmt.POST("/api-keys/mutate", s.mgmt.MutateAPIKey)
 		mgmt.PUT("/api-keys", s.mgmt.PutAPIKeys)
 		mgmt.PATCH("/api-keys", s.mgmt.PatchAPIKeys)
 		mgmt.DELETE("/api-keys", s.mgmt.DeleteAPIKeys)
@@ -103,6 +107,9 @@ func (s *Server) registerManagementRoutes() {
 
 		mgmt.GET("/logs", s.mgmt.GetLogs)
 		mgmt.DELETE("/logs", s.mgmt.DeleteLogs)
+		mgmt.GET("/request-logs", s.mgmt.ListRequestLogs)
+		mgmt.GET("/request-logs/:name", s.mgmt.GetRequestLogPreview)
+		mgmt.GET("/request-logs/:name/download", s.mgmt.DownloadRequestLog)
 		mgmt.GET("/request-error-logs", s.mgmt.GetRequestErrorLogs)
 		mgmt.GET("/request-error-logs/:name", s.mgmt.DownloadRequestErrorLog)
 		mgmt.GET("/request-log-by-id/:id", s.mgmt.GetRequestLogByID)
@@ -189,6 +196,9 @@ func (s *Server) registerManagementRoutes() {
 
 		mgmt.GET("/anthropic-auth-url", s.mgmt.RequestAnthropicToken)
 		mgmt.GET("/codex-auth-url", s.mgmt.RequestCodexToken)
+		mgmt.POST("/codex/device-auth", s.mgmt.StartCodexDeviceAuth)
+		mgmt.GET("/codex/device-auth", s.mgmt.GetCodexDeviceAuth)
+		mgmt.DELETE("/codex/device-auth", s.mgmt.CancelCodexDeviceAuth)
 		mgmt.GET("/antigravity-auth-url", s.mgmt.RequestAntigravityToken)
 		mgmt.GET("/kimi-auth-url", s.mgmt.RequestKimiToken)
 		mgmt.GET("/xai-auth-url", s.mgmt.RequestXAIToken)

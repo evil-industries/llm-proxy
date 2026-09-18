@@ -164,9 +164,11 @@ type recentRequestRing struct {
 }
 
 type RecentRequestBucket struct {
-	Time    string `json:"time"`
-	Success int64  `json:"success"`
-	Failed  int64  `json:"failed"`
+	Time string `json:"time"`
+	// Timestamp identifies the interval even when local clock labels repeat during DST.
+	Timestamp int64 `json:"timestamp"`
+	Success   int64 `json:"success"`
+	Failed    int64 `json:"failed"`
 }
 
 // QuotaState contains limiter tracking data for a credential.
@@ -272,7 +274,8 @@ func (a *Auth) RecentRequestsSnapshot(now time.Time) []RecentRequestBucket {
 		idx := recentRequestBucketIndex(bucketID)
 		bucket := a.recentRequests.buckets[idx]
 		entry := RecentRequestBucket{
-			Time: formatRecentRequestBucketLabel(bucketID),
+			Time:      formatRecentRequestBucketLabel(bucketID),
+			Timestamp: bucketID * recentRequestBucketSeconds,
 		}
 		if bucket.bucketID == bucketID {
 			entry.Success = bucket.success

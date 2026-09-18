@@ -1,0 +1,12 @@
+node_modules/
+.svelte-kit/
+build/
+coverage/
+test-results/
+.garden-dist/
+.garden/
+.env
+.playwright-cli/
+.vitest-attachments/
+output/playwright/
+deploy/data/

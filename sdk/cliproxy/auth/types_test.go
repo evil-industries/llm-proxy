@@ -234,6 +234,9 @@ func TestRecentRequestsSnapshotEmptyReturnsTwentyBuckets(t *testing.T) {
 			t.Fatalf("bucket[%d] time label is empty", i)
 		}
 		expectedBucketID := baseBucketID + int64(i)
+		if bucket.Timestamp != expectedBucketID*recentRequestBucketSeconds {
+			t.Fatalf("bucket[%d] timestamp = %d, want %d", i, bucket.Timestamp, expectedBucketID*recentRequestBucketSeconds)
+		}
 		start := time.Unix(expectedBucketID*recentRequestBucketSeconds, 0).In(time.Local)
 		end := start.Add(10 * time.Minute)
 		expected := start.Format("15:04") + "-" + end.Format("15:04")
@@ -364,5 +367,39 @@ func TestAuth_ExpirationTime_JWTExp(t *testing.T) {
 	}
 	if authNoAccess.HasValidAccessToken(time.Now()) {
 		t.Fatal("HasValidAccessToken() should return false when access_token is missing")
+	}
+}
+
+func TestRecentRequestsSnapshotDistinctTimestampsAcrossDSTFallback(t *testing.T) {
+	location, errLocation := time.LoadLocation("Europe/Berlin")
+	if errLocation != nil {
+		t.Fatal(errLocation)
+	}
+	previous := time.Local
+	time.Local = location
+	t.Cleanup(func() { time.Local = previous })
+	now := time.Date(2026, time.October, 25, 2, 10, 0, 0, time.UTC)
+	auth := &Auth{}
+	for i := 0; i < recentRequestBucketCount; i++ {
+		auth.recordRecentRequest(now.Add(-time.Duration(i)*10*time.Minute), true)
+	}
+	buckets := auth.RecentRequestsSnapshot(now)
+	labels := make(map[string]bool)
+	timestamps := make(map[int64]bool)
+	for i, bucket := range buckets {
+		labels[bucket.Time] = true
+		if timestamps[bucket.Timestamp] {
+			t.Fatalf("duplicate timestamp: %d", bucket.Timestamp)
+		}
+		timestamps[bucket.Timestamp] = true
+		if bucket.Success != 1 {
+			t.Fatalf("bucket[%d] success = %d, want 1", i, bucket.Success)
+		}
+		if i > 0 && bucket.Timestamp-buckets[i-1].Timestamp != 600 {
+			t.Fatalf("bucket[%d] is not the next ten-minute interval", i)
+		}
+	}
+	if len(timestamps) != 20 || len(labels) >= len(timestamps) {
+		t.Fatalf("expected twenty distinct intervals with repeated clock labels, got %d timestamps and %d labels", len(timestamps), len(labels))
 	}
 }

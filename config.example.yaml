@@ -35,6 +35,19 @@ remote-management:
 # Authentication directory (supports ~ for home directory)
 auth-dir: "~/.cli-proxy-api"
 
+# Optional quota alerts from the gateway, delivered to a self-hosted ntfy server.
+# Subscribe to the topic in ntfy. Protect the topic with ntfy access controls.
+# The token is stored only in the Go configuration and omitted from config JSON.
+notifications:
+  enabled: false
+  url: "" # e.g. https://ntfy.example.com; a base path is supported
+  topic: ""
+  token: "" # Optional ntfy access token with publish permission on the topic
+  warning-percent: 20 # Remaining quota, not percentage used
+  critical-percent: 5
+  reset-notifications: true # Notify on a confirmed window reset or recovery from low quota
+  banked-reset-notifications: true # Notify when Codex reports available banked resets or their count increases; never auto-redeem
+
 # API keys for authentication
 api-keys:
   - "your-api-key-1"

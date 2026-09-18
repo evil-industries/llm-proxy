@@ -24,6 +24,8 @@ import (
 
 // Download single auth file by name
 func (h *Handler) DownloadAuthFile(c *gin.Context) {
+	cfg := h.configSnapshot()
+
 	name := strings.TrimSpace(c.Query("name"))
 	if isUnsafeAuthFileName(name) {
 		c.JSON(400, gin.H{"error": "invalid name"})
@@ -33,7 +35,7 @@ func (h *Handler) DownloadAuthFile(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "name must end with .json"})
 		return
 	}
-	full := filepath.Join(h.cfg.AuthDir, name)
+	full := filepath.Join(cfg.AuthDir, name)
 	data, err := os.ReadFile(full)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -49,7 +51,9 @@ func (h *Handler) DownloadAuthFile(c *gin.Context) {
 
 // Upload auth file: multipart or raw JSON with ?name=
 func (h *Handler) UploadAuthFile(c *gin.Context) {
-	if h.authManager == nil {
+	manager := h.authManagerSnapshot()
+
+	if manager == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "core auth manager unavailable"})
 		return
 	}
@@ -130,13 +134,17 @@ func (h *Handler) UploadAuthFile(c *gin.Context) {
 
 // Delete auth files: single by name or all
 func (h *Handler) DeleteAuthFile(c *gin.Context) {
-	if h.authManager == nil {
+	manager := h.authManagerSnapshot()
+
+	cfg := h.configSnapshot()
+
+	if manager == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "core auth manager unavailable"})
 		return
 	}
 	ctx := c.Request.Context()
 	if all := c.Query("all"); all == "true" || all == "1" || all == "*" {
-		entries, err := os.ReadDir(h.cfg.AuthDir)
+		entries, err := os.ReadDir(cfg.AuthDir)
 		if err != nil {
 			c.JSON(500, gin.H{"error": fmt.Sprintf("failed to read auth dir: %v", err)})
 			return
@@ -150,7 +158,7 @@ func (h *Handler) DeleteAuthFile(c *gin.Context) {
 			if !strings.HasSuffix(strings.ToLower(name), ".json") {
 				continue
 			}
-			full := filepath.Join(h.cfg.AuthDir, name)
+			full := filepath.Join(cfg.AuthDir, name)
 			if !filepath.IsAbs(full) {
 				if abs, errAbs := filepath.Abs(full); errAbs == nil {
 					full = abs
@@ -259,7 +267,9 @@ func (h *Handler) storeUploadedAuthFile(ctx context.Context, file *multipart.Fil
 }
 
 func (h *Handler) writeAuthFile(ctx context.Context, name string, data []byte) error {
-	dst := filepath.Join(h.cfg.AuthDir, filepath.Base(name))
+	cfg := h.configSnapshot()
+
+	dst := filepath.Join(cfg.AuthDir, filepath.Base(name))
 	if !filepath.IsAbs(dst) {
 		if abs, errAbs := filepath.Abs(dst); errAbs == nil {
 			dst = abs
@@ -345,12 +355,14 @@ func uniqueAuthFileNames(names []string) []string {
 }
 
 func (h *Handler) deleteAuthFileByName(ctx context.Context, name string) (string, int, error) {
+	cfg := h.configSnapshot()
+
 	name = strings.TrimSpace(name)
 	if isUnsafeAuthFileName(name) {
 		return "", http.StatusBadRequest, fmt.Errorf("invalid name")
 	}
 
-	targetPath := filepath.Join(h.cfg.AuthDir, filepath.Base(name))
+	targetPath := filepath.Join(cfg.AuthDir, filepath.Base(name))
 	targetID := ""
 	if targetAuth := h.findAuthForDelete(name); targetAuth != nil {
 		if !isPluginVirtualSourceDelete(name, targetAuth) {
@@ -394,17 +406,19 @@ func isPluginVirtualSourceDelete(name string, auth *coreauth.Auth) bool {
 }
 
 func (h *Handler) findAuthForDelete(name string) *coreauth.Auth {
-	if h == nil || h.authManager == nil {
+	manager := h.authManagerSnapshot()
+
+	if h == nil || manager == nil {
 		return nil
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil
 	}
-	if auth, ok := h.authManager.GetByID(name); ok {
+	if auth, ok := manager.GetByID(name); ok {
 		return auth
 	}
-	auths := h.authManager.List()
+	auths := manager.List()
 	for _, auth := range auths {
 		if auth == nil {
 			continue
@@ -420,6 +434,8 @@ func (h *Handler) findAuthForDelete(name string) *coreauth.Auth {
 }
 
 func (h *Handler) authIDForPath(path string) string {
+	cfg := h.configSnapshot()
+
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return ""
@@ -431,8 +447,8 @@ func (h *Handler) authIDForPath(path string) string {
 		}
 	}
 	id := path
-	if h != nil && h.cfg != nil {
-		authDir := strings.TrimSpace(h.cfg.AuthDir)
+	if h != nil && cfg != nil {
+		authDir := strings.TrimSpace(cfg.AuthDir)
 		if resolvedAuthDir, errResolve := util.ResolveAuthDir(authDir); errResolve == nil && resolvedAuthDir != "" {
 			authDir = resolvedAuthDir
 		}
@@ -456,7 +472,9 @@ func (h *Handler) authIDForPath(path string) string {
 }
 
 func (h *Handler) registerAuthFromFile(ctx context.Context, path string, data []byte) error {
-	if h.authManager == nil {
+	manager := h.authManagerSnapshot()
+
+	if manager == nil {
 		return nil
 	}
 	auth, err := h.buildAuthFromFileData(path, data)
@@ -467,6 +485,10 @@ func (h *Handler) registerAuthFromFile(ctx context.Context, path string, data []
 }
 
 func (h *Handler) buildAuthFromFileData(path string, data []byte) (*coreauth.Auth, error) {
+	manager := h.authManagerSnapshot()
+
+	cfg := h.configSnapshot()
+
 	if path == "" {
 		return nil, fmt.Errorf("auth path is empty")
 	}
@@ -497,10 +519,10 @@ func (h *Handler) buildAuthFromFileData(path string, data []byte) (*coreauth.Aut
 		authID = path
 	}
 	auth := (*coreauth.Auth)(nil)
-	if h != nil && h.cfg != nil {
+	if h != nil && cfg != nil {
 		sctx := &synthesizer.SynthesisContext{
-			Config:      h.cfg,
-			AuthDir:     h.cfg.AuthDir,
+			Config:      cfg,
+			AuthDir:     cfg.AuthDir,
 			Now:         time.Now(),
 			IDGenerator: synthesizer.NewStableIDGenerator(),
 		}
@@ -532,8 +554,8 @@ func (h *Handler) buildAuthFromFileData(path string, data []byte) (*coreauth.Aut
 	if hasLastRefresh {
 		auth.LastRefreshedAt = lastRefresh
 	}
-	if h != nil && h.authManager != nil {
-		if existing, ok := h.authManager.GetByID(authID); ok {
+	if h != nil && manager != nil {
+		if existing, ok := manager.GetByID(authID); ok {
 			auth.CreatedAt = existing.CreatedAt
 			if !hasLastRefresh {
 				auth.LastRefreshedAt = existing.LastRefreshedAt
@@ -547,14 +569,16 @@ func (h *Handler) buildAuthFromFileData(path string, data []byte) (*coreauth.Aut
 }
 
 func (h *Handler) upsertAuthRecord(ctx context.Context, auth *coreauth.Auth) error {
-	if h == nil || h.authManager == nil || auth == nil {
+	manager := h.authManagerSnapshot()
+
+	if h == nil || manager == nil || auth == nil {
 		return nil
 	}
-	if existing, ok := h.authManager.GetByID(auth.ID); ok {
+	if existing, ok := manager.GetByID(auth.ID); ok {
 		auth.CreatedAt = existing.CreatedAt
-		_, err := h.authManager.Update(ctx, auth)
+		_, err := manager.Update(ctx, auth)
 		return err
 	}
-	_, err := h.authManager.Register(ctx, auth)
+	_, err := manager.Register(ctx, auth)
 	return err
 }

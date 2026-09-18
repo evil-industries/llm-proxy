@@ -21,6 +21,11 @@ logs
 conv
 config.yaml
 
+# The Go image does not use the frontend or its private deployment data.
+/frontend
+.env
+.env.*
+
 # Development/editor
 bin
 .vscode

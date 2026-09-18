@@ -191,6 +191,9 @@ func (s *Server) UpdateClientsContext(ctx context.Context, cfg *config.Config) b
 		s.pluginHost.SetAuthManager(s.handlers.AuthManager)
 	}
 
+	if s.notifications != nil {
+		s.notifications.Configure(cfg.Notifications)
+	}
 	if s.mgmt != nil {
 		s.mgmt.SetConfig(cfg)
 		s.mgmt.SetAuthManager(s.handlers.AuthManager)

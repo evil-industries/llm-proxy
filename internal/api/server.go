@@ -24,6 +24,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementasset"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/notifications"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/pluginhost"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/redisqueue"
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v7/sdk/access"
@@ -81,6 +82,12 @@ type Server struct {
 
 	// management handler
 	mgmt *managementHandlers.Handler
+
+	// Quota notifications run independently of management browser connections.
+	notifications       *notifications.Service
+	notificationsMu     sync.Mutex
+	notificationsCancel context.CancelFunc
+	notificationsDone   <-chan struct{}
 
 	// pluginHost owns dynamic plugin Management API route dispatch.
 	pluginHost *pluginhost.Host
@@ -202,6 +209,14 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	applySignatureCacheConfig(nil, cfg)
 	// Initialize management handler
 	s.mgmt = managementHandlers.NewHandler(cfg, configFilePath, authManager)
+	s.notifications = notifications.New(func() []*auth.Auth {
+		if authManager == nil {
+			return nil
+		}
+		return authManager.List()
+	})
+	s.notifications.Configure(cfg.Notifications)
+	s.mgmt.SetNotifications(s.notifications)
 	s.mgmt.SetPluginHost(optionState.pluginHost)
 	s.mgmt.SetConfigReloadHook(optionState.configReloadHook)
 	if optionState.localPassword != "" {
@@ -314,6 +329,9 @@ func (s *Server) Start() error {
 	s.muxBaseListener = listener
 	s.muxHTTPListener = httpListener
 
+	s.startNotifications()
+	defer func() { _ = s.stopNotifications(context.Background()) }()
+
 	httpErrCh := make(chan error, 1)
 	acceptErrCh := make(chan error, 1)
 
@@ -376,6 +394,11 @@ func (s *Server) Start() error {
 //   - error: An error if the server fails to stop
 func (s *Server) Stop(ctx context.Context) error {
 	log.Debug("Stopping API server...")
+	if s.mgmt != nil {
+		// Cancel acquisition promptly; drain background commits below with ctx.
+		s.mgmt.CancelDeviceAuthFlows()
+	}
+	errNotifications := s.stopNotifications(ctx)
 
 	if s.keepAliveEnabled {
 		select {
@@ -398,10 +421,20 @@ func (s *Server) Stop(ctx context.Context) error {
 	if s.codexLiveHandler != nil {
 		s.codexLiveHandler.Close()
 	}
+	var errDeviceAuth error
+	if s.mgmt != nil {
+		errDeviceAuth = s.mgmt.WaitDeviceAuthFlows(ctx)
+	}
 	if errShutdown != nil {
-		return fmt.Errorf("failed to shutdown HTTP server: %v", errShutdown)
+		return fmt.Errorf("failed to shutdown HTTP server: %w", errShutdown)
+	}
+	if errDeviceAuth != nil {
+		return fmt.Errorf("failed to drain device authentication: %w", errDeviceAuth)
 	}
 
+	if errNotifications != nil {
+		return fmt.Errorf("failed to stop notifications: %w", errNotifications)
+	}
 	log.Debug("API server stopped")
 	return nil
 }

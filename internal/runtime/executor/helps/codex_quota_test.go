@@ -338,3 +338,48 @@ func TestMergeWebsocketQuotaHeaders(t *testing.T) {
 		t.Fatalf("merged response headers = %#v", headers)
 	}
 }
+
+func TestParseCodexQuotaEventHeadersBankedResetCount(t *testing.T) {
+	for _, tc := range []struct{ name, body, want string }{
+		{"snake case", `"rate_limit_reset_credits":{"available_count":2,"credits":null}`, "2"},
+		{"camel case", `"rateLimitResetCredits":{"availableCount":2,"credits":[{"id":"one-detail-only"}]}`, "2"},
+		{"zero", `"rate_limit_reset_credits":{"available_count":0,"credits":[{"id":"expired"}]}`, "0"},
+		{"missing count", `"rate_limit_reset_credits":{"credits":[{},{}]}`, ""},
+		{"null", `"rate_limit_reset_credits":{"available_count":null}`, ""},
+		{"negative", `"rate_limit_reset_credits":{"available_count":-1}`, ""},
+		{"fraction", `"rate_limit_reset_credits":{"available_count":1.5}`, ""},
+		{"decimal", `"rate_limit_reset_credits":{"available_count":2.0}`, ""},
+		{"exponent", `"rate_limit_reset_credits":{"available_count":2e1}`, ""},
+		{"boolean", `"rate_limit_reset_credits":{"available_count":true}`, ""},
+		{"string", `"rate_limit_reset_credits":{"available_count":"2"}`, ""},
+		{"overflow", `"rate_limit_reset_credits":{"available_count":9223372036854775808}`, ""},
+		{"array", `"rate_limit_reset_credits":{"available_count":[2]}`, ""},
+		{"malformed", `"rate_limit_reset_credits":{"available_count":2`, ""},
+		{"leading zeros", `"rate_limit_reset_credits":{"available_count":02}`, ""},
+		{"monetary credits", `"credits":{"balance":"2","has_credits":true}`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := []byte(`{"type":"codex.rate_limits",` + tc.body + `}`)
+			headers := ParseCodexQuotaEventHeaders(payload)
+			if got := headers.Get(codexResetCreditsCountHeader); got != tc.want {
+				t.Fatalf("available count = %q, want %q", got, tc.want)
+			}
+			if tc.want != "" && len(headers) != 1 {
+				t.Fatalf("banked-only event produced unrelated quota fields: %#v", headers)
+			}
+		})
+	}
+}
+
+func TestParseCodexQuotaErrorHeadersBankedResetCount(t *testing.T) {
+	for _, tc := range []struct{ value, want string }{
+		{`"2"`, "2"}, {`"0"`, "0"}, {`2`, "2"}, {`0`, "0"},
+		{`null`, ""}, {`true`, ""}, {`-1`, ""}, {`1.5`, ""},
+		{`"-1"`, ""}, {`"1.5"`, ""}, {`"true"`, ""}, {`"9223372036854775808"`, ""},
+	} {
+		headers := ParseCodexQuotaEventHeaders([]byte(`{"type":"error","headers":{"x-codex-rate-limit-reset-credits-available-count":` + tc.value + `}}`))
+		if got := headers.Get(codexResetCreditsCountHeader); got != tc.want {
+			t.Fatalf("header %s = %q, want %q", tc.value, got, tc.want)
+		}
+	}
+}
