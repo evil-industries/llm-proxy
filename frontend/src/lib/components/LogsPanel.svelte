@@ -409,7 +409,9 @@
           <ScrollText size={26} />
           <h3>File logging is disabled</h3>
           <p>Enable application file logging to inspect server activity here.</p>
-          <Button disabled={disabled || busy} onclick={enableLogging}>Enable file logging</Button>
+          <Button variant="constructive" disabled={disabled || busy} onclick={enableLogging}
+            >Enable file logging</Button
+          >
         </div>
       {:else if !loaded && busy}<p role="status" class="empty-state">Loading server logs…</p>
       {:else if !filtered.length}<div class="empty-state">
@@ -705,10 +707,10 @@
     color: var(--muted-foreground);
   }
   .level[data-level='error'] {
-    color: #b42318;
+    color: var(--destructive);
   }
   .level[data-level='warn'] {
-    color: #925600;
+    color: var(--warning);
   }
   .line-text {
     white-space: pre-wrap;
@@ -757,9 +759,8 @@
     max-height: 50dvh;
     overflow: auto;
     min-width: 0;
-    padding: 12px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
+    padding-block: 16px;
+    border-block: 1px solid var(--border);
     font:
       12px/1.7 ui-monospace,
       SFMono-Regular,

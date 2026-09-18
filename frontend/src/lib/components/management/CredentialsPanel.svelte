@@ -72,7 +72,7 @@
       <h2 id="credentials-title">Provider credentials</h2>
       <p class="muted">Manage the accounts available to your proxy.</p>
     </div>
-    <Button variant="outline" disabled={disabled || busy} onclick={() => uploadInput.click()}
+    <Button variant="constructive" disabled={disabled || busy} onclick={() => uploadInput.click()}
       ><Upload size={15} /> Upload JSON</Button
     >
     <input
@@ -135,7 +135,12 @@
               </p>{/if}
           </div>
           <div class="credential-controls">
-            <Badge variant="outline"
+            <Badge
+              variant={file.disabled
+                ? 'outline'
+                : file.unavailable || file.status === 'error'
+                  ? 'destructive'
+                  : 'trust'}
               >{file.disabled
                 ? 'Disabled'
                 : file.unavailable
@@ -153,7 +158,7 @@
                     checked ? 'Credential enabled.' : 'Credential disabled.'
                   )}
               />{/key}{#if !file.runtime_only}<Button
-                variant="ghost"
+                variant="destructive"
                 size="icon"
                 aria-label={`Delete ${file.name}`}
                 disabled={disabled || busy}
@@ -268,17 +273,6 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 15px;
-  }
-  .delete-confirmation {
-    flex-basis: 100%;
-    padding: 14px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--muted);
-  }
-  .delete-confirmation p {
-    overflow-wrap: anywhere;
-    margin-bottom: 12px;
   }
   @media (max-width: 480px) {
     .credential-row,

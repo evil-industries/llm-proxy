@@ -17,10 +17,14 @@
   --color-muted-foreground: #666;
   --color-accent: #f5f5f5;
   --color-accent-foreground: #171717;
-  --color-destructive: #b42318;
-  --color-border: #e5e5e5;
+  --color-trust: var(--trust);
+  --color-trust-foreground: var(--trust-foreground);
+  --color-constructive: var(--constructive);
+  --color-constructive-foreground: var(--constructive-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
   --color-input: #dedede;
-  --color-ring: #737373;
+  --color-ring: var(--ring);
   --radius-md: 6px;
   --radius-lg: 8px;
 }
@@ -38,6 +42,15 @@
   --background: #fff;
   --foreground: #171717;
   --primary: #171717;
+  --trust: #1d4ed8;
+  --trust-foreground: #fff;
+  --constructive: #16703c;
+  --constructive-foreground: #fff;
+  --constructive-subtle: #f0fdf4;
+  --destructive: #b42318;
+  --destructive-subtle: #fff5f5;
+  --warning: #925600;
+  --ring: #1d4ed8;
   --border: #e5e5e5;
   --muted: #f5f5f5;
   --muted-foreground: #666;
@@ -68,8 +81,10 @@ button:not(:disabled),
 select {
   cursor: pointer;
 }
-a {
-  color: inherit;
+@layer base {
+  a {
+    color: inherit;
+  }
 }
 button,
 input,
@@ -90,7 +105,7 @@ select {
   background: #fff;
 }
 :focus-visible {
-  outline: 2px solid #171717;
+  outline: 2px solid var(--ring);
   outline-offset: 3px;
 }
 h1,
@@ -115,7 +130,7 @@ h3 {
   font-weight: 600;
 }
 .muted {
-  color: #666;
+  color: var(--muted-foreground);
 }
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -132,8 +147,8 @@ h3 {
   align-items: center;
   flex-wrap: wrap;
   gap: 16px;
-  padding: 20px 24px;
-  border-bottom: 1px solid #ededed;
+  padding: 24px;
+  border-bottom: 1px solid var(--border);
 }
 .section-heading {
   display: grid;
@@ -176,7 +191,7 @@ h3 {
   justify-items: center;
   text-align: center;
   gap: 9px;
-  color: #666;
+  color: var(--muted-foreground);
 }
 .empty-state h3 {
   color: #171717;
@@ -184,16 +199,24 @@ h3 {
 .error-banner,
 .success-banner {
   padding: 12px 16px;
-  border: 1px solid #fecaca;
-  background: #fff5f5;
-  color: #a32020;
-  border-radius: 6px;
+  border-left: 3px solid currentColor;
+  background: var(--destructive-subtle);
+  color: var(--destructive);
   overflow-wrap: anywhere;
 }
 .success-banner {
-  border-color: #b8e1ca;
-  background: #f1fbf5;
-  color: #17663a;
+  background: var(--constructive-subtle);
+  color: var(--constructive);
+}
+.delete-confirmation {
+  flex-basis: 100%;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+  color: var(--destructive);
+}
+.delete-confirmation p {
+  overflow-wrap: anywhere;
+  margin-bottom: 12px;
 }
 .table-scroll {
   overflow-x: auto;
@@ -206,14 +229,14 @@ h3 {
 }
 .data-table th {
   font-weight: 500;
-  color: #666;
+  color: var(--muted-foreground);
   background: #fafafa;
   font-size: 12px;
 }
 .data-table td,
 .data-table th {
   padding: 15px 24px;
-  border-bottom: 1px solid #ededed;
+  border-bottom: 1px solid var(--border);
 }
 .data-table tbody tr:last-child td {
   border-bottom: 0;
@@ -233,7 +256,7 @@ select {
   align-items: center;
   gap: 7px;
   font-size: 12px;
-  color: #267044;
+  color: var(--constructive);
 }
 .status::before {
   content: '';
@@ -244,7 +267,10 @@ select {
   flex-shrink: 0;
 }
 .status.offline {
-  color: #666;
+  color: var(--muted-foreground);
+}
+.status.attention {
+  color: var(--destructive);
 }
 .skip-link {
   position: fixed;

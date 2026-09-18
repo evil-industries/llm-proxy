@@ -8,8 +8,8 @@
   let { files = [] }: { files?: AuthFile[] } = $props();
   const uid = $props.id();
   const config = {
-    success: { label: 'Successful', color: '#2563eb' },
-    failed: { label: 'Failed', color: '#dc2626' }
+    success: { label: 'Successful', color: 'var(--constructive)' },
+    failed: { label: 'Failed', color: 'var(--destructive)' }
   } satisfies Chart.ChartConfig;
   const series = [
     { key: 'success', label: config.success.label, color: 'var(--color-success)' },

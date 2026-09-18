@@ -274,7 +274,10 @@
         </div>
       </div>
       <div class="notification-actions">
-        <Button type="submit" disabled={locked || !dirty}
+        <Button
+          variant={clearToken ? 'destructive' : 'constructive'}
+          type="submit"
+          disabled={locked || !dirty}
           ><Save size={14} />{busy === 'save' ? 'Saving…' : 'Save notifications'}</Button
         >
         <Button
@@ -313,9 +316,6 @@
 </section>
 
 <style>
-  .notifications-panel {
-    margin-top: 24px;
-  }
   h2 {
     display: flex;
     align-items: center;
@@ -360,6 +360,8 @@
     grid-column: 1 / -1;
   }
   .clear-token {
+    color: var(--destructive);
+    accent-color: var(--destructive);
     display: flex;
     align-items: center;
     gap: 8px;

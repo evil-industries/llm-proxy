@@ -137,8 +137,8 @@
           gateway.</Card.Description
         >
       </div>
-      {#if complete}<Badge variant="secondary"><Check aria-hidden="true" />Connected</Badge
-        >{:else if pending}<Badge variant="outline">Awaiting approval</Badge>{/if}
+      {#if complete}<Badge variant="trust"><Check aria-hidden="true" />Connected</Badge
+        >{:else if pending}<Badge variant="trust">Awaiting approval</Badge>{/if}
     </div>
   </Card.Header>
   <Card.Content class="device-content">
@@ -214,7 +214,7 @@
                 href="https://auth.openai.com/codex/device"
                 target="_blank"
                 rel="noopener noreferrer"
-                variant="outline">Open approval page<ExternalLink aria-hidden="true" /></Button
+                variant="trust">Open approval page<ExternalLink aria-hidden="true" /></Button
               >{/if}
           </div>
         </li>
@@ -264,7 +264,7 @@
         >{#if busy === 'load'}<LoaderCircle class="animate-spin" aria-hidden="true" />{/if}Check
         connection</Button
       >
-      <Button variant="ghost" onclick={() => perform('cancel')} disabled={disabled || !!busy}
+      <Button variant="destructive" onclick={() => perform('cancel')} disabled={disabled || !!busy}
         >{busy === 'cancel' ? 'Cancelling…' : 'Cancel connection'}</Button
       >
     {:else if uncertain || !flow}
@@ -272,7 +272,7 @@
         >Check connection</Button
       >
     {:else}
-      <Button onclick={() => perform('start')} disabled={disabled || !!busy}
+      <Button variant="trust" onclick={() => perform('start')} disabled={disabled || !!busy}
         >{#if busy === 'start'}<LoaderCircle
             class="animate-spin"
             aria-hidden="true"
@@ -299,6 +299,23 @@
 <style>
   :global(.device-auth) {
     container-type: inline-size;
+    --card-spacing: 24px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    box-shadow: none;
+  }
+  :global(.device-auth [data-slot='alert']) {
+    border: 0;
+    border-left: 3px solid var(--warning);
+    border-radius: 0;
+    background: transparent;
+  }
+  :global(.device-auth [data-slot='alert'][role='alert']) {
+    border-left-color: var(--destructive);
+  }
+  :global(.device-auth [data-slot='card-footer']) {
+    background: transparent;
+    border-color: var(--border);
   }
   .device-heading {
     display: flex;
@@ -315,9 +332,7 @@
     width: 2.6rem;
     height: 2.6rem;
     flex: 0 0 auto;
-    border: 1px solid var(--border);
-    border-radius: 0.75rem;
-    background: var(--muted);
+    color: var(--trust);
   }
   :global(.device-content) {
     display: grid;
@@ -355,8 +370,8 @@
     display: grid;
     place-items: center;
     height: 1.6rem;
-    border: 1px solid var(--border);
-    border-radius: 100%;
+    color: var(--trust);
+    font-weight: 600;
     font-size: 0.75rem;
   }
   h3 {
@@ -371,10 +386,8 @@
     flex-wrap: wrap;
     gap: 0.75rem;
     margin: 0.8rem 0 0.4rem;
-    padding: 1rem;
-    border: 1px solid var(--border);
-    border-radius: 0.65rem;
-    background: var(--muted);
+    padding-block: 0.5rem;
+    color: var(--trust);
   }
   output {
     flex: 1 1 9rem;
@@ -399,6 +412,7 @@
   .device-success > :global(svg) {
     flex-shrink: 0;
     margin-top: 0.2rem;
+    color: var(--trust);
   }
   .device-success > div {
     min-width: 0;
@@ -417,7 +431,7 @@
       text-align: center;
     }
     .device-code {
-      padding: 0.7rem;
+      padding-block: 0.5rem;
     }
   }
 </style>

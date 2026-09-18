@@ -8,6 +8,9 @@
     variants: {
       variant: {
         default: 'bg-primary text-primary-foreground hover:bg-primary/80',
+        trust: 'bg-trust text-trust-foreground hover:bg-trust/90 focus-visible:ring-trust/30',
+        constructive:
+          'bg-constructive text-constructive-foreground hover:bg-constructive/90 focus-visible:ring-constructive/30',
         outline:
           'border-border bg-background hover:bg-muted hover:text-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50 aria-expanded:bg-muted aria-expanded:text-foreground',
         secondary:

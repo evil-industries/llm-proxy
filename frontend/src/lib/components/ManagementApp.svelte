@@ -181,6 +181,17 @@
   <header class="topbar">
     <div class="topbar-inner">
       <span class="workspace">Management</span>
+      {#if client}
+        <nav aria-label="Management sections">
+          {#each views as item}<button
+              class:active={view === item}
+              disabled={busy || notificationSaving}
+              aria-current={view === item ? 'page' : undefined}
+              onclick={() => navigate(item)}>{item}</button
+            >{/each}
+        </nav>
+      {/if}
+
       <div class="topbar-actions">
         {#if !demo}<Button
             variant="ghost"
@@ -192,18 +203,6 @@
       </div>
     </div>
   </header>
-  {#if client}
-    <div class="navigation">
-      <nav aria-label="Management sections">
-        {#each views as item}<button
-            class:active={view === item}
-            disabled={busy || notificationSaving}
-            aria-current={view === item ? 'page' : undefined}
-            onclick={() => navigate(item)}>{item}</button
-          >{/each}
-      </nav>
-    </div>
-  {/if}
   <main id="main" tabindex="-1">
     {#if sessionExpired}
       <div class="panel empty-state" role="alert">
@@ -217,12 +216,14 @@
         </div>{/if}
       <div class="page-heading">
         <div>
-          <div class="eyebrow">{demo ? 'PREVIEW' : 'INSTANCE'}</div>
           <h1>{view}</h1>
           <p class="muted">{descriptions[view]}</p>
         </div>
         <div class="heading-actions">
-          <span class:offline={demo || Object.keys(errors).length > 0} class="status"
+          <span
+            class:offline={demo}
+            class:attention={!demo && Object.keys(errors).length > 0}
+            class="status"
             >{demo
               ? 'Demo mode'
               : Object.keys(errors).length
@@ -302,57 +303,61 @@
     flex-direction: column;
   }
   .topbar {
-    background: #fff;
-    border-bottom: 1px solid #eaeaea;
+    background: var(--background);
+    border-bottom: 1px solid var(--border);
   }
   .topbar-inner {
-    min-height: 72px;
-    padding: 14px 32px;
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 20px;
-  }
-  .workspace {
-    font-weight: 500;
-  }
-  .topbar-actions {
-    margin-left: auto;
-    display: flex;
-    flex-wrap: wrap;
-    max-width: 100%;
-    align-items: center;
-    gap: 24px;
-  }
-  .navigation {
-    background: white;
-    border-bottom: 1px solid #e5e5e5;
-  }
-  nav {
     max-width: 1216px;
+    min-height: 64px;
     margin: 0 auto;
     padding: 0 32px;
     display: flex;
-    gap: 26px;
+    align-items: center;
     flex-wrap: wrap;
+    gap: 0 32px;
+  }
+  .workspace {
+    font-weight: 650;
+    letter-spacing: -0.3px;
+  }
+  .topbar-actions {
+    margin-left: auto;
+    padding-block: 10px;
+  }
+  nav {
+    display: flex;
+    align-self: stretch;
+    align-items: stretch;
+    flex-wrap: wrap;
+    gap: 0 24px;
+    min-width: 0;
   }
   nav button {
-    padding: 17px 0 15px;
+    min-height: 48px;
+    padding: 18px 0 16px;
     border: 0;
     border-bottom: 2px solid transparent;
-    color: #666;
+    color: var(--muted-foreground);
     background: transparent;
   }
+  nav button:hover:not(:disabled):not(.active) {
+    color: var(--primary);
+    border-bottom-color: var(--border);
+  }
   nav button.active {
-    color: #171717;
-    border-bottom-color: #171717;
-    font-weight: 500;
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+    font-weight: 600;
+  }
+  nav button:disabled {
+    cursor: default;
+    opacity: 0.6;
   }
   main {
     width: 100%;
     max-width: 1216px;
     margin: 0 auto;
-    padding: 36px 32px 56px;
+    padding: 40px 32px 56px;
     flex: 1;
     min-width: 0;
   }
@@ -362,13 +367,11 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 12px;
-    border: 1px solid #e5e5e5;
-    background: #f5f5f5;
-    padding: 11px 16px;
-    border-radius: 7px;
-    margin-bottom: 32px;
+    padding-bottom: 16px;
+    margin-bottom: 24px;
+    border-bottom: 1px solid var(--border);
     font-size: 12px;
-    color: #555;
+    color: var(--muted-foreground);
   }
   .demo-banner > span {
     display: flex;
@@ -381,14 +384,7 @@
     justify-content: space-between;
     align-items: center;
     gap: 20px;
-    margin-bottom: 30px;
-  }
-  .eyebrow {
-    font-size: 10px;
-    letter-spacing: 1.3px;
-    color: #737373;
-    margin-bottom: 10px;
-    font-weight: 500;
+    margin-bottom: 32px;
   }
   .page-heading p {
     margin-top: 8px;
@@ -398,6 +394,10 @@
     align-items: center;
     gap: 20px;
     flex-shrink: 0;
+  }
+  .view-content {
+    display: grid;
+    gap: 32px;
   }
   .error-stack {
     display: grid;
@@ -411,47 +411,44 @@
     gap: 10px;
     margin-top: 26px;
     font-size: 12px;
-    color: #737373;
+    color: var(--muted-foreground);
     overflow-wrap: anywhere;
   }
-  @media (max-width: 760px) {
+  @media (max-width: 900px) {
     .topbar-inner {
-      padding: 16px 20px;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-    .topbar-actions {
-      gap: 12px;
+      padding: 0 20px;
+      gap: 0 24px;
     }
     nav {
-      gap: 22px;
-      padding: 0 20px;
+      order: 3;
+      flex-basis: 100%;
+      gap: 0 24px;
     }
+    nav button {
+      padding-block: 12px;
+    }
+  }
+  @media (max-width: 760px) {
     main {
-      padding: 24px 20px 40px;
+      padding: 28px 20px 40px;
     }
     .page-heading {
       align-items: start;
       flex-direction: column;
+      gap: 20px;
     }
     .heading-actions {
       width: 100%;
       justify-content: space-between;
     }
-    .demo-banner {
-      margin-bottom: 26px;
-    }
   }
   @media (max-width: 400px) {
-    main {
+    main,
+    .topbar-inner {
       padding-inline: 16px;
     }
     nav {
       column-gap: 20px;
-      row-gap: 0;
-    }
-    nav button {
-      padding-block: 12px;
     }
   }
 </style>

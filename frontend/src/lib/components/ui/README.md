@@ -9,3 +9,9 @@ The installed Bits UI version exposes `data-state` and `data-orientation`. The n
 Every production component has a `.das.js` story. Context-dependent parts share a complete interactive `.example.svelte` composition so they render inside the required parent providers.
 
 Garden 1.6.2 generates invalid JavaScript import bindings for hyphenated directories such as `scroll-area`. The Garden-only Vite transform in `garden.vite.config.js`, backed by `scripts/garden-generated.mjs`, normalizes only imported identifiers in the three generated map modules. Paths, labels and lookup keys remain unchanged; conflicting identifiers fail explicitly. Unit tests cover those guarantees.
+
+## Semantic color and hierarchy
+
+Keep primary for general emphasis and navigation. Use `trust` (blue) for approval, account connection, and authorized status; `constructive` (green) for adding, saving, and successful outcomes; and `destructive` (red) for removal and errors. Button and Badge expose these variants, backed by CSS tokens in `app.css`. Retain text or icons so color is never the only indicator.
+
+Use one bordered surface per major section. Inside it, group content with spacing, headings, and dividers; do not nest cards or bordered confirmation boxes.
