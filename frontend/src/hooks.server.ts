@@ -23,9 +23,10 @@ export const handle: Handle = async ({ event, resolve }) => {
   ) {
     return safeJSON({ error: 'Request origin does not match the configured public origin.' }, 403);
   }
-  event.locals.authenticated =
-    Boolean(event.locals.managementConfiguration) &&
-    authStore.authenticated(event.cookies.get(sessionCookieName(production)));
+  event.locals.sessionIdentity = event.locals.managementConfiguration
+    ? authStore.identity(event.cookies.get(sessionCookieName(production)))
+    : undefined;
+  event.locals.authenticated = Boolean(event.locals.sessionIdentity);
   const path = event.url.pathname;
   if (path !== '/login' && path !== '/api/session') {
     if (path.startsWith('/v0/'))

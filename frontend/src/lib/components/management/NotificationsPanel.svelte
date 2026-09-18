@@ -9,11 +9,13 @@
   let {
     client,
     disabled = false,
-    initialData
+    initialData,
+    onsavingchange = () => {}
   }: {
     client: ManagementClient;
     disabled?: boolean;
     initialData?: NotificationSettings;
+    onsavingchange?: (saving: boolean) => void;
   } = $props();
   const initial = untrack(() => initialData);
   let saved = $state<NotificationSettings | undefined>(initial);
@@ -72,7 +74,10 @@
   onMount(() => {
     const controller = new AbortController();
     if (!saved) void load(controller.signal);
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      onsavingchange(false);
+    };
   });
   async function save(event: SubmitEvent) {
     event.preventDefault();
@@ -101,6 +106,7 @@
       ...(clearToken ? { clear_token: true } : token ? { token } : {})
     };
     busy = 'save';
+    onsavingchange(true);
     try {
       apply(await client.setNotifications(update));
       success = 'Notification settings saved.';
@@ -108,6 +114,7 @@
       error = message(cause);
     } finally {
       busy = null;
+      onsavingchange(false);
     }
   }
   async function testDelivery() {

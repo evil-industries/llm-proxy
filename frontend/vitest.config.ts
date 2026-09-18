@@ -22,6 +22,14 @@ export default defineConfig({
       },
       {
         plugins: [tailwindcss(), svelte()],
+        optimizeDeps: {
+          include: [
+            '@lucide/svelte/icons/chevron-down',
+            '@lucide/svelte/icons/chevron-up',
+            '@lucide/svelte/icons/check',
+            '@lucide/svelte/icons/x'
+          ]
+        },
         resolve: {
           alias: { $lib: fileURLToPath(new URL('./src/lib', import.meta.url)) },
           conditions: ['browser']

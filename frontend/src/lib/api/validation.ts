@@ -98,7 +98,32 @@ const plugin: Validator = (value) =>
 
 /** Validate fields consumed by the UI while allowing new server fields. */
 export function validManagementResponse(path: string, value: unknown): boolean {
-  switch (path.split('?')[0]) {
+  const pathname = path.split('?')[0];
+  if (pathname.startsWith('/request-logs/'))
+    return (
+      object(value) &&
+      string(value.name) &&
+      string(value.text) &&
+      count(value.next_offset) &&
+      count(value.size) &&
+      count(value.modified) &&
+      boolean(value.has_more)
+    );
+  switch (pathname) {
+    case '/codex/device-auth':
+      return validCodexDeviceAuth(value);
+    case '/request-logs':
+      return (
+        object(value) &&
+        array(
+          (file) =>
+            object(file) &&
+            string(file.name) &&
+            count(file.size) &&
+            count(file.modified) &&
+            ['request', 'error'].includes(file.kind as string)
+        )(value.files)
+      );
     case '/notifications':
       return (
         object(value) &&
@@ -152,4 +177,36 @@ export function validManagementResponse(path: string, value: unknown): boolean {
     default:
       return true;
   }
+}
+
+export function validCodexDeviceAuth(value: unknown): boolean {
+  if (
+    !object(value) ||
+    !['idle', 'pending', 'complete', 'error', 'expired', 'cancelled'].includes(
+      value.status as string
+    )
+  )
+    return false;
+  if (!fields(value, ['user_code', 'verification_uri', 'expires_at', 'error'], string))
+    return false;
+  if (!fields(value, ['interval'], (v) => number(v) && (v as number) >= 1)) return false;
+  if (
+    !fields(
+      value,
+      ['account'],
+      (v) => object(v) && string(v.name) && fields(v, ['email', 'plan_type'], string)
+    )
+  )
+    return false;
+  if (value.status === 'pending')
+    return (
+      typeof value.user_code === 'string' &&
+      value.user_code.length > 0 &&
+      value.verification_uri === 'https://auth.openai.com/codex/device' &&
+      typeof value.expires_at === 'string' &&
+      Number.isFinite(Date.parse(value.expires_at)) &&
+      number(value.interval) &&
+      (value.interval as number) >= 1
+    );
+  return true;
 }

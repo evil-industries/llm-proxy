@@ -36,6 +36,8 @@ function mockServer() {
     if (url.pathname === '/api/session' && method === 'DELETE')
       return new Response(null, { status: 204 });
     if (state.sessionExpired) return Response.json({ error: secret }, { status: 401 });
+    if (url.pathname === '/api/codex/device-auth' && method === 'GET')
+      return Response.json({ status: 'idle' });
     if (state.failRefresh && method === 'GET')
       return Response.json({ error: secret }, { status: 503 });
     if (state.failMutation && method !== 'GET')
@@ -347,7 +349,7 @@ test('credential switch persists through the actual client and refreshes its sta
   await loaded();
   await navigate('Credentials');
   await page.getByRole('switch', { name: `Enable ${longName}`, exact: true }).click();
-  await expect.element(page.getByRole('status')).toHaveTextContent('Credential disabled.');
+  await expect.element(page.getByText('Credential disabled.', { exact: true })).toBeVisible();
   expect(state.files[0].disabled).toBe(true);
   const patch = fetch.mock.calls.find(([, options]) => options?.method === 'PATCH');
   expect(JSON.parse(String(patch?.[1]?.body))).toEqual({
@@ -391,6 +393,21 @@ test('sign in and all management sections pass automated WCAG accessibility chec
     await navigate(section);
     if (section === 'Settings')
       await expect.element(page.getByLabelText('Warning remaining quota (%)')).toHaveValue(20);
+    if (section === 'Logs') {
+      await expect
+        .element(page.getByRole('button', { name: 'Refresh logs', exact: true }))
+        .toBeEnabled();
+      // Wait for initial loading-button opacity transitions before measuring contrast.
+      await expect
+        .poll(() =>
+          [
+            ...document.querySelectorAll<HTMLElement>(
+              '[aria-label="Log inspection"] button:not(:disabled)'
+            )
+          ].every((element) => getComputedStyle(element).opacity === '1')
+        )
+        .toBe(true);
+    }
     expect(await server.commands.auditAccessibility(), section).toEqual([]);
   }
 });
@@ -450,7 +467,7 @@ test('uploads a credential as multipart and confirms removal before deleting', a
     type: 'application/json'
   });
   await page.getByLabelText('Upload credential JSON', { exact: true }).upload(file);
-  await expect.element(page.getByRole('status')).toHaveTextContent('Credential uploaded.');
+  await expect.element(page.getByText('Credential uploaded.', { exact: true })).toBeVisible();
   const upload = fetch.mock.calls.find(([, options]) => options?.method === 'POST');
   expect((upload?.[1]?.body as FormData).get('file')).toBeInstanceOf(File);
   expect(new Headers(upload?.[1]?.headers).has('Content-Type')).toBe(false);
@@ -459,7 +476,7 @@ test('uploads a credential as multipart and confirms removal before deleting', a
   expect(state.files).toHaveLength(2);
   expect(fetch.mock.calls.some(([, options]) => options?.method === 'DELETE')).toBe(false);
   await page.getByRole('button', { name: 'Delete credential', exact: true }).click();
-  await expect.element(page.getByRole('status')).toHaveTextContent('Credential deleted.');
+  await expect.element(page.getByText('Credential deleted.', { exact: true })).toBeVisible();
   expect(state.files).toHaveLength(1);
   await expect
     .element(page.getByText('uploaded-account.json', { exact: true }))
@@ -591,12 +608,16 @@ test('awaits a fresh snapshot when a mutation completes during an older refresh'
   await expect.poll(() => refreshRequests).toBe(3);
   mutation.resolve();
   await expect.poll(() => state.files[0].disabled).toBe(true);
-  await expect.element(page.getByRole('status')).not.toBeInTheDocument();
+  await expect
+    .element(page.getByText('Credential disabled.', { exact: true }))
+    .not.toBeInTheDocument();
   oldRefresh.resolve();
   await expect.poll(() => refreshRequests).toBe(6);
-  await expect.element(page.getByRole('status')).not.toBeInTheDocument();
+  await expect
+    .element(page.getByText('Credential disabled.', { exact: true }))
+    .not.toBeInTheDocument();
   newRefresh.resolve();
-  await expect.element(page.getByRole('status')).toHaveTextContent('Credential disabled.');
+  await expect.element(page.getByText('Credential disabled.', { exact: true })).toBeVisible();
   await expect
     .element(page.getByRole('switch', { name: `Enable ${longName}`, exact: true }))
     .not.toBeChecked();

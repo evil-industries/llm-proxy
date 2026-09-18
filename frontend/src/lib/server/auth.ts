@@ -81,6 +81,10 @@ export class AuthStore {
     return this.sessions.has(digest(token));
   }
 
+  identity(token: string | undefined): string | undefined {
+    return this.authenticated(token) ? digest(token!) : undefined;
+  }
+
   revoke(token: string | undefined) {
     if (token) this.sessions.delete(digest(token));
   }

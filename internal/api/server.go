@@ -394,6 +394,10 @@ func (s *Server) Start() error {
 //   - error: An error if the server fails to stop
 func (s *Server) Stop(ctx context.Context) error {
 	log.Debug("Stopping API server...")
+	if s.mgmt != nil {
+		// Cancel acquisition promptly; drain background commits below with ctx.
+		s.mgmt.CancelDeviceAuthFlows()
+	}
 	errNotifications := s.stopNotifications(ctx)
 
 	if s.keepAliveEnabled {
@@ -417,8 +421,15 @@ func (s *Server) Stop(ctx context.Context) error {
 	if s.codexLiveHandler != nil {
 		s.codexLiveHandler.Close()
 	}
+	var errDeviceAuth error
+	if s.mgmt != nil {
+		errDeviceAuth = s.mgmt.WaitDeviceAuthFlows(ctx)
+	}
 	if errShutdown != nil {
-		return fmt.Errorf("failed to shutdown HTTP server: %v", errShutdown)
+		return fmt.Errorf("failed to shutdown HTTP server: %w", errShutdown)
+	}
+	if errDeviceAuth != nil {
+		return fmt.Errorf("failed to drain device authentication: %w", errDeviceAuth)
 	}
 
 	if errNotifications != nil {

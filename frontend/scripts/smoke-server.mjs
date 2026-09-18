@@ -31,21 +31,37 @@ reservation.listen(0, '127.0.0.1');
 await once(reservation, 'listening');
 const port = reservation.address().port;
 await new Promise((resolve) => reservation.close(resolve));
-const server = spawn(process.execPath, ['build'], {
-  cwd: new URL('../', import.meta.url),
-  env: {
-    ...process.env,
-    NODE_ENV: '',
-    BODY_SIZE_LIMIT: 'Infinity',
-    HOST: '127.0.0.1',
-    PORT: String(port),
-    ORIGIN: origin,
-    AUTH_PASSWORD_HASH: hash,
-    PRIVATE_MANAGEMENT_KEY: key,
-    PRIVATE_MANAGEMENT_URL: `http://127.0.0.1:${upstream.address().port}`
-  },
-  stdio: ['ignore', 'pipe', 'pipe']
-});
+const server = spawn(
+  process.execPath,
+  [
+    '--input-type=module',
+    '--eval',
+    `
+  import assert from 'node:assert/strict';
+  const { httpServer } = await import('./server.mjs');
+  assert.equal(httpServer.requestTimeout, 0, 'Uploads must have no whole-request deadline');
+  assert.equal(httpServer.headersTimeout, 60000, 'Keep the adapter header deadline');
+  assert.equal(httpServer.timeout, 0, 'Established requests must have no socket deadline');
+  console.log('Production timeout settings verified');
+`
+  ],
+  {
+    cwd: new URL('../', import.meta.url),
+    env: {
+      ...process.env,
+      NODE_ENV: '',
+      BODY_SIZE_LIMIT: 'Infinity',
+      HOST: '127.0.0.1',
+      PORT: String(port),
+      HEADERS_TIMEOUT: '60',
+      ORIGIN: origin,
+      AUTH_PASSWORD_HASH: hash,
+      PRIVATE_MANAGEMENT_KEY: key,
+      PRIVATE_MANAGEMENT_URL: `http://127.0.0.1:${upstream.address().port}`
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  }
+);
 const base = `http://127.0.0.1:${port}`;
 const request = (path, options) => fetch(`${base}${path}`, { redirect: 'manual', ...options });
 let startupOutput = '';
@@ -62,7 +78,10 @@ try {
     server.once('exit', exit);
     server.stdout.on('data', (chunk) => {
       startupOutput += chunk.toString();
-      if (startupOutput.includes('Listening on')) {
+      if (
+        startupOutput.includes('Listening on') &&
+        startupOutput.includes('Production timeout settings verified')
+      ) {
         clearTimeout(timer);
         server.off('exit', exit);
         resolve();

@@ -34,6 +34,14 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm run test:server
+      - run: npm run deploy:test
+      - name: Get the same Caddy binary used by Compose
+        run: |
+          docker run --rm --entrypoint /bin/cat caddy:2.11.4-alpine /usr/bin/caddy > "$RUNNER_TEMP/caddy"
+          chmod +x "$RUNNER_TEMP/caddy"
+      - run: npm run test:proxy
+        env:
+          CADDY_BIN: ${{ runner.temp }}/caddy
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

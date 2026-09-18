@@ -26,7 +26,9 @@ import (
 
 // PatchAuthFileStatus toggles the disabled state of an auth file
 func (h *Handler) PatchAuthFileStatus(c *gin.Context) {
-	if h.authManager == nil {
+	manager := h.authManagerSnapshot()
+
+	if manager == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "core auth manager unavailable"})
 		return
 	}
@@ -126,7 +128,7 @@ func (h *Handler) PatchAuthFileStatus(c *gin.Context) {
 	}
 
 	applyAuthDisabledState(targetAuth, *req.Disabled)
-	updatedAuth, err := h.authManager.Update(ctx, targetAuth)
+	updatedAuth, err := manager.Update(ctx, targetAuth)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to update auth: %v", err)})
 		return
@@ -149,7 +151,9 @@ func (h *Handler) PatchAuthFileStatus(c *gin.Context) {
 // patchPluginVirtualSourceStatus toggles disabled on a plugin multi-auth source file and all
 // runtime auths expanded from it. Virtual project children cannot be toggled independently.
 func (h *Handler) patchPluginVirtualSourceStatus(ctx context.Context, targetAuth *coreauth.Auth, disabled bool) ([]*coreauth.Auth, error) {
-	if h == nil || h.authManager == nil || targetAuth == nil {
+	manager := h.authManagerSnapshot()
+
+	if h == nil || manager == nil || targetAuth == nil {
 		return nil, fmt.Errorf("core auth manager unavailable")
 	}
 	sourcePath := strings.TrimSpace(authAttribute(targetAuth, coreauth.AttributeVirtualSource))
@@ -167,7 +171,7 @@ func (h *Handler) patchPluginVirtualSourceStatus(ctx context.Context, targetAuth
 	}
 	now := time.Now()
 	hookAuths := make([]*coreauth.Auth, 0)
-	for _, auth := range h.authManager.List() {
+	for _, auth := range manager.List() {
 		if auth == nil {
 			continue
 		}
@@ -177,7 +181,7 @@ func (h *Handler) patchPluginVirtualSourceStatus(ctx context.Context, targetAuth
 		}
 		applyAuthDisabledState(auth, disabled)
 		auth.UpdatedAt = now
-		updated, errUpdate := h.authManager.Update(ctx, auth)
+		updated, errUpdate := manager.Update(ctx, auth)
 		if errUpdate != nil {
 			return nil, fmt.Errorf("failed to update auth %s: %w", auth.ID, errUpdate)
 		}
@@ -256,7 +260,9 @@ func applyAuthDisabledState(auth *coreauth.Auth, disabled bool) {
 
 // PatchAuthFileFields updates arbitrary metadata fields of an auth file.
 func (h *Handler) PatchAuthFileFields(c *gin.Context) {
-	if h.authManager == nil {
+	manager := h.authManagerSnapshot()
+
+	if manager == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "core auth manager unavailable"})
 		return
 	}
@@ -306,10 +312,10 @@ func (h *Handler) PatchAuthFileFields(c *gin.Context) {
 
 	// Find auth by name or ID
 	var targetAuth *coreauth.Auth
-	if auth, ok := h.authManager.GetByID(name); ok {
+	if auth, ok := manager.GetByID(name); ok {
 		targetAuth = auth
 	} else {
-		auths := h.authManager.List()
+		auths := manager.List()
 		for _, auth := range auths {
 			if auth.FileName == name {
 				targetAuth = auth
@@ -396,7 +402,7 @@ func (h *Handler) PatchAuthFileFields(c *gin.Context) {
 
 	targetAuth.UpdatedAt = time.Now()
 
-	updatedAuth, err := h.authManager.Update(ctx, targetAuth)
+	updatedAuth, err := manager.Update(ctx, targetAuth)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to update auth: %v", err)})
 		return
@@ -808,30 +814,34 @@ func syncAuthFileDisabledState(auth *coreauth.Auth) {
 }
 
 func (h *Handler) removeAuth(ctx context.Context, id string) {
-	if h == nil || h.authManager == nil {
+	manager := h.authManagerSnapshot()
+
+	if h == nil || manager == nil {
 		return
 	}
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return
 	}
-	if _, ok := h.authManager.GetByID(id); ok {
-		h.authManager.Remove(ctx, id)
+	if _, ok := manager.GetByID(id); ok {
+		manager.Remove(ctx, id)
 		return
 	}
 	authID := h.authIDForPath(id)
 	if authID == "" {
 		return
 	}
-	h.authManager.Remove(ctx, authID)
+	manager.Remove(ctx, authID)
 }
 
 func (h *Handler) removeAuthsForPath(ctx context.Context, path string, fallbackID string) {
-	if h == nil || h.authManager == nil {
+	manager := h.authManagerSnapshot()
+
+	if h == nil || manager == nil {
 		return
 	}
 	removed := false
-	for _, auth := range h.authManager.List() {
+	for _, auth := range manager.List() {
 		if auth == nil {
 			continue
 		}
@@ -888,43 +898,53 @@ func (h *Handler) tokenStoreWithBaseDir() coreauth.Store {
 	if h == nil {
 		return nil
 	}
+	h.mu.Lock()
 	store := h.tokenStore
 	if store == nil {
 		store = sdkAuth.GetTokenStore()
 		h.tokenStore = store
 	}
-	if h.cfg != nil {
+	authDir := ""
+	hasConfig := h.cfg != nil
+	if hasConfig {
+		authDir = h.cfg.AuthDir
+	}
+	h.mu.Unlock()
+	if hasConfig {
 		if dirSetter, ok := store.(interface{ SetBaseDir(string) }); ok {
-			dirSetter.SetBaseDir(h.cfg.AuthDir)
+			dirSetter.SetBaseDir(authDir)
 		}
 	}
 	return store
 }
 
 func (h *Handler) mergeExistingAuthFileMetadata(record *coreauth.Auth) {
+	manager := h.authManagerSnapshot()
+
 	if h == nil || record == nil {
 		return
 	}
 	var existingMap map[string]any
+	cfg := h.configSnapshot()
 
-	if h.cfg != nil && strings.TrimSpace(h.cfg.AuthDir) != "" {
+	if cfg != nil && strings.TrimSpace(cfg.AuthDir) != "" {
 		targetFile := record.FileName
 		if targetFile == "" {
 			targetFile = record.ID
 		}
 		if targetFile != "" {
-			fullPath := filepath.Join(h.cfg.AuthDir, targetFile)
+			fullPath := filepath.Join(cfg.AuthDir, targetFile)
 			if raw, errRead := os.ReadFile(fullPath); errRead == nil && len(raw) > 0 {
 				_ = json.Unmarshal(raw, &existingMap)
 			}
 		}
 	}
 
-	if existingMap == nil && h.authManager != nil {
-		if existing, ok := h.authManager.GetByID(record.ID); ok && existing != nil && existing.Metadata != nil {
+	if existingMap == nil && manager != nil {
+		if existing, ok := manager.GetByID(record.ID); ok && existing != nil && existing.Metadata != nil {
 			existingMap = existing.Metadata
 		} else {
-			for _, auth := range h.authManager.List() {
+			for _, auth := range manager.List() {
 				if auth != nil && auth.FileName == record.FileName && auth.Metadata != nil {
 					existingMap = auth.Metadata
 					break
@@ -979,7 +999,7 @@ func (h *Handler) saveTokenRecord(ctx context.Context, record *coreauth.Auth) (s
 		persistedRecord := record
 		if data, errRead := os.ReadFile(savedPath); errRead == nil && len(data) > 0 {
 			auths, errSynthesize := synthesizer.SynthesizeAuthFile(&synthesizer.SynthesisContext{
-				Config:           h.cfg,
+				Config:           h.configSnapshot(),
 				AuthDir:          filepath.Dir(savedPath),
 				Now:              time.Now(),
 				IDGenerator:      synthesizer.NewStableIDGenerator(),

@@ -1,5 +1,9 @@
 import type {
   APIKeyUsage,
+  CodexDeviceAuth,
+  RequestLogFile,
+  RequestLogPreview,
+  RequestLogPreviewQuery,
   AuthFile,
   BooleanSetting,
   LogsQuery,
@@ -127,7 +131,8 @@ function createClient(base: string, key: string | undefined, fetcher: typeof glo
     path: string,
     method = 'GET',
     body?: unknown,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    requestBase = base
   ): Promise<T> {
     const multipart = body instanceof FormData;
     const headers = new Headers({ Accept: 'application/json' });
@@ -135,7 +140,7 @@ function createClient(base: string, key: string | undefined, fetcher: typeof glo
     if (body !== undefined && !multipart) headers.set('Content-Type', 'application/json');
     let response: Response;
     try {
-      response = await fetcher(`${base}${path}`, {
+      response = await fetcher(`${requestBase}${path}`, {
         method,
         headers,
         signal,
@@ -159,7 +164,7 @@ function createClient(base: string, key: string | undefined, fetcher: typeof glo
     try {
       const value: unknown = await response.json();
       if (
-        (method === 'GET' || path === '/notifications') &&
+        (method === 'GET' || path === '/notifications' || path === '/codex/device-auth') &&
         !validManagementResponse(path, value)
       ) {
         throw new Error('Invalid response shape');
@@ -174,7 +179,58 @@ function createClient(base: string, key: string | undefined, fetcher: typeof glo
     }
   }
 
+  function deviceAuth(method: string, signal?: AbortSignal) {
+    if (key)
+      throw new ManagementError(
+        'invalid-request',
+        'Connect Codex accounts through the signed-in management console.'
+      );
+    return request<CodexDeviceAuth>(
+      '/codex/device-auth',
+      method,
+      method === 'POST' ? {} : undefined,
+      signal,
+      '/api'
+    );
+  }
+  function logName(name: string): string {
+    if (!name || /[\\/\x00-\x1f\x7f]/.test(name) || name === '.' || name === '..')
+      throw new ManagementError('invalid-request', 'Choose a valid request log file.');
+    return encodeURIComponent(name);
+  }
+
   return {
+    getCodexDeviceAuth: (signal?: AbortSignal) => deviceAuth('GET', signal),
+    startCodexDeviceAuth: (signal?: AbortSignal) => deviceAuth('POST', signal),
+    cancelCodexDeviceAuth: (signal?: AbortSignal) => deviceAuth('DELETE', signal),
+    async listRequestLogs(signal?: AbortSignal): Promise<RequestLogFile[]> {
+      const result = await request<{ files: RequestLogFile[] }>(
+        '/request-logs',
+        'GET',
+        undefined,
+        signal
+      );
+      return result.files;
+    },
+    getRequestLogPreview(name: string, query: RequestLogPreviewQuery = {}, signal?: AbortSignal) {
+      const params = new URLSearchParams();
+      if (query.offset !== undefined) params.set('offset', String(query.offset));
+      if (query.limit !== undefined) params.set('limit', String(query.limit));
+      return request<RequestLogPreview>(
+        `/request-logs/${logName(name)}${params.size ? `?${params}` : ''}`,
+        'GET',
+        undefined,
+        signal
+      );
+    },
+    getRequestLogDownloadURL: (name: string) => {
+      if (key)
+        throw new ManagementError(
+          'invalid-request',
+          'Download logs through the signed-in management console.'
+        );
+      return `${base}/request-logs/${logName(name)}/download`;
+    },
     getNotifications: (signal?: AbortSignal) =>
       request<NotificationSettings>('/notifications', 'GET', undefined, signal),
     setNotifications: (settings: NotificationUpdate, signal?: AbortSignal) =>

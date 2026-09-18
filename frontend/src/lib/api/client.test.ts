@@ -295,3 +295,74 @@ describe('response shape validation', () => {
     await expect(client.getConfig()).rejects.toMatchObject({ code: 'invalid-response' });
   });
 });
+
+it('uses the console session for device flows and paged request logs, never a browser management key', async () => {
+  const { createSessionManagementClient } = await import('./client');
+  const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+    const url = String(input);
+    if (url === '/api/codex/device-auth') return new Response(JSON.stringify({ status: 'idle' }));
+    if (url === '/api/management/request-logs') return new Response(JSON.stringify({ files: [] }));
+    return new Response(
+      JSON.stringify({
+        name: 'a.log',
+        text: 'next',
+        next_offset: 8,
+        size: 8,
+        modified: 1,
+        has_more: false
+      })
+    );
+  });
+  const client = createSessionManagementClient(fetcher);
+  await client.getCodexDeviceAuth();
+  await client.startCodexDeviceAuth();
+  await client.cancelCodexDeviceAuth();
+  expect(fetcher.mock.calls.slice(0, 3).map((call) => call[1]?.method)).toEqual([
+    'GET',
+    'POST',
+    'DELETE'
+  ]);
+  expect(await client.listRequestLogs()).toEqual([]);
+  expect((await client.getRequestLogPreview('a.log', { offset: 4, limit: 4 })).text).toBe('next');
+  expect(fetcher.mock.calls.at(-1)?.[0]).toBe(
+    '/api/management/request-logs/a.log?offset=4&limit=4'
+  );
+  expect(client.getRequestLogDownloadURL('a.log')).toBe(
+    '/api/management/request-logs/a.log/download'
+  );
+  for (const [, init] of fetcher.mock.calls) {
+    expect(init?.credentials).toBe('same-origin');
+    expect(new Headers(init?.headers).has('authorization')).toBe(false);
+  }
+});
+
+it('rejects malformed device challenges and request-log pages', async () => {
+  const { createSessionManagementClient } = await import('./client');
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        status: 'pending',
+        verification_uri: 'https://attacker.example',
+        user_code: 'code'
+      })
+    )
+  );
+  await expect(createSessionManagementClient(fetcher).startCodexDeviceAuth()).rejects.toMatchObject(
+    { code: 'invalid-response' }
+  );
+  const invalidPage = vi.fn<typeof fetch>().mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        name: 'a.log',
+        text: 'text',
+        next_offset: -1,
+        size: 1,
+        modified: 1,
+        has_more: false
+      })
+    )
+  );
+  await expect(
+    createSessionManagementClient(invalidPage).getRequestLogPreview('a.log')
+  ).rejects.toMatchObject({ code: 'invalid-response' });
+});

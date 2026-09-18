@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -73,5 +74,46 @@ func TestSaveTokenToFile_PreservesCustomMetadata(t *testing.T) {
 	}
 	if saved["weight"] != float64(42) {
 		t.Errorf("weight = %v, want 42", saved["weight"])
+	}
+}
+
+func TestSaveTokenToFile_RestrictsNewAndExistingCredentials(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permissions are not supported on Windows")
+	}
+	for _, existing := range []bool{false, true} {
+		name := "new"
+		if existing {
+			name = "existing"
+		}
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "codex.json")
+			if existing {
+				if err := os.WriteFile(path, []byte("old credentials"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chmod(path, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			storage := &CodexTokenStorage{AccessToken: "access", RefreshToken: "refresh"}
+			if err := storage.SaveTokenToFile(path); err != nil {
+				t.Fatal(err)
+			}
+			info, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.Mode().Perm() != 0o600 {
+				t.Fatalf("credential mode = %o, want600", info.Mode().Perm())
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !json.Valid(data) {
+				t.Fatal("credential file was not replaced correctly")
+			}
+		})
 	}
 }

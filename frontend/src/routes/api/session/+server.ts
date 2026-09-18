@@ -1,3 +1,4 @@
+import { deviceAuthSessions } from '$lib/server/device-auth';
 import { dev } from '$app/environment';
 import type { RequestHandler } from './$types';
 import {
@@ -62,16 +63,20 @@ export const POST: RequestHandler = async ({ request, url, locals, cookies, getC
     );
   const production = !dev;
   const name = sessionCookieName(production);
+  const previousIdentity = authStore.identity(cookies.get(name));
   authStore.revoke(cookies.get(name));
+  void deviceAuthSessions.forget(previousIdentity, locals.managementConfiguration);
   cookies.set(name, token, cookieOptions(production));
   return safeJSON({ authenticated: true });
 };
 
-export const DELETE: RequestHandler = ({ request, url, cookies }) => {
+export const DELETE: RequestHandler = ({ request, url, cookies, locals }) => {
   if (!sameOrigin(request, url))
     return safeJSON({ error: 'Request origin was not accepted.' }, 403);
   const name = sessionCookieName(!dev);
+  const previousIdentity = authStore.identity(cookies.get(name));
   authStore.revoke(cookies.get(name));
+  void deviceAuthSessions.forget(previousIdentity, locals.managementConfiguration);
   cookies.delete(name, { path: '/' });
   return safeJSON({ authenticated: false });
 };

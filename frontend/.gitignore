@@ -9,3 +9,4 @@ test-results/
 .playwright-cli/
 .vitest-attachments/
 output/playwright/
+deploy/data/

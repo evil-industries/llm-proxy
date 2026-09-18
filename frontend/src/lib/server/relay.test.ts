@@ -215,3 +215,88 @@ describe('authenticated upstream relay', () => {
     expect((await relayManagement(request('config'), 'config', config, fetcher)).status).toBe(502);
   });
 });
+
+it('streams request-log downloads without buffering or forwarding upstream cookie/HTML headers', async () => {
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  const body = new ReadableStream<Uint8Array>({
+    start(value) {
+      controller = value;
+    }
+  });
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+    new Response(body, {
+      headers: { 'Content-Type': 'text/html', 'Set-Cookie': 'private=secret' }
+    })
+  );
+  const name = 'error-v1-responses-2026-09-18T001122-a.log';
+  const path = `request-logs/${name}/download`;
+  const response = await relayManagement(request(path), path, config, fetcher);
+  expect(response.headers.get('content-type')).toBe('text/plain; charset=utf-8');
+  expect(response.headers.get('content-disposition')).toContain('attachment;');
+  expect(response.headers.get('set-cookie')).toBeNull();
+  expect(response.headers.get('cache-control')).toBe('no-store');
+  const reader = response.body!.getReader();
+  controller.enqueue(new TextEncoder().encode('first chunk'));
+  expect(new TextDecoder().decode((await reader.read()).value)).toBe('first chunk');
+  controller.enqueue(new TextEncoder().encode('second chunk'));
+  controller.close();
+  expect(new TextDecoder().decode((await reader.read()).value)).toBe('second chunk');
+  expect((await reader.read()).done).toBe(true);
+});
+
+it.each([
+  ['request-logs/a/file.log', ''],
+  ['request-logs/a\\file.log', ''],
+  ['request-logs/a.log/download', '?offset=1'],
+  ['request-logs/a.log', '?offset=0&offset=1'],
+  ['request-logs/a.log', '?target=/etc/passwd'],
+  ['request-logs/a.log', '?state=secret'],
+  ['codex/device-auth', '']
+])('rejects unapproved file routes and query parameters: %s%s', async (path, query) => {
+  const fetcher = upstream();
+  const response = await relayManagement(request(path + query), path, config, fetcher);
+  expect([400, 404]).toContain(response.status);
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+it('forwards request-log pagination and preserves private auth', async () => {
+  const path = 'request-logs/v1-responses-2026-09-18T001122-a.log';
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        name: path.split('/')[1],
+        text: 'page',
+        next_offset: 4,
+        size: 8,
+        modified: 1,
+        has_more: true
+      })
+    )
+  );
+  expect(
+    (await relayManagement(request(path + '?offset=0&limit=4'), path, config, fetcher)).status
+  ).toBe(200);
+  expect(fetcher.mock.calls[0][0]).toBe(config.managementURL + '/' + path + '?offset=0&limit=4');
+  expect(new Headers(fetcher.mock.calls[0][1]?.headers).get('authorization')).toBe(
+    'Bearer private-secret'
+  );
+});
+
+it.each(['gemini-2.5-pro(8192)', 'model%2Fvariant', 'model#variant', '模型'])(
+  'encodes literal filename characters exactly once: %s',
+  async (prefix) => {
+    const name = `${prefix}-2026-09-18T001122-a.log`;
+    const path = `request-logs/${name}/download`;
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response('log contents'));
+    const response = await relayManagement(
+      request(`request-logs/${encodeURIComponent(name)}/download`),
+      path,
+      config,
+      fetcher
+    );
+    expect(response.status).toBe(200);
+    expect(fetcher.mock.calls[0][0]).toBe(
+      `${config.managementURL}/request-logs/${encodeURIComponent(name)}/download`
+    );
+  }
+);

@@ -1117,10 +1117,14 @@ func (h *Handler) DeleteVertexCompatKey(c *gin.Context) {
 
 // oauth-excluded-models: map[string][]string
 func (h *Handler) GetOAuthExcludedModels(c *gin.Context) {
-	c.JSON(200, gin.H{"oauth-excluded-models": config.NormalizeOAuthExcludedModels(h.cfg.OAuthExcludedModels)})
+	c.JSON(200, gin.H{"oauth-excluded-models": config.NormalizeOAuthExcludedModels(h.configSnapshot().OAuthExcludedModels)})
 }
 
 func (h *Handler) PutOAuthExcludedModels(c *gin.Context) {
+	h.reloadMu.Lock()
+	defer h.reloadMu.Unlock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	data, err := c.GetRawData()
 	if err != nil {
 		c.JSON(400, gin.H{"error": "failed to read body"})
@@ -1138,10 +1142,14 @@ func (h *Handler) PutOAuthExcludedModels(c *gin.Context) {
 		entries = wrapper.Items
 	}
 	h.cfg.OAuthExcludedModels = config.NormalizeOAuthExcludedModels(entries)
-	h.persist(c)
+	h.persistLocked(c)
 }
 
 func (h *Handler) PatchOAuthExcludedModels(c *gin.Context) {
+	h.reloadMu.Lock()
+	defer h.reloadMu.Unlock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	var body struct {
 		Provider *string  `json:"provider"`
 		Models   []string `json:"models"`
@@ -1169,17 +1177,21 @@ func (h *Handler) PatchOAuthExcludedModels(c *gin.Context) {
 		if len(h.cfg.OAuthExcludedModels) == 0 {
 			h.cfg.OAuthExcludedModels = nil
 		}
-		h.persist(c)
+		h.persistLocked(c)
 		return
 	}
 	if h.cfg.OAuthExcludedModels == nil {
 		h.cfg.OAuthExcludedModels = make(map[string][]string)
 	}
 	h.cfg.OAuthExcludedModels[provider] = normalized
-	h.persist(c)
+	h.persistLocked(c)
 }
 
 func (h *Handler) DeleteOAuthExcludedModels(c *gin.Context) {
+	h.reloadMu.Lock()
+	defer h.reloadMu.Unlock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	provider := strings.ToLower(strings.TrimSpace(c.Query("provider")))
 	if provider == "" {
 		c.JSON(400, gin.H{"error": "missing provider"})
@@ -1197,15 +1209,19 @@ func (h *Handler) DeleteOAuthExcludedModels(c *gin.Context) {
 	if len(h.cfg.OAuthExcludedModels) == 0 {
 		h.cfg.OAuthExcludedModels = nil
 	}
-	h.persist(c)
+	h.persistLocked(c)
 }
 
 // oauth-model-alias: map[string][]OAuthModelAlias
 func (h *Handler) GetOAuthModelAlias(c *gin.Context) {
-	c.JSON(200, gin.H{"oauth-model-alias": sanitizedOAuthModelAlias(h.cfg.OAuthModelAlias)})
+	c.JSON(200, gin.H{"oauth-model-alias": sanitizedOAuthModelAlias(h.configSnapshot().OAuthModelAlias)})
 }
 
 func (h *Handler) PutOAuthModelAlias(c *gin.Context) {
+	h.reloadMu.Lock()
+	defer h.reloadMu.Unlock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	data, err := c.GetRawData()
 	if err != nil {
 		c.JSON(400, gin.H{"error": "failed to read body"})
@@ -1223,10 +1239,14 @@ func (h *Handler) PutOAuthModelAlias(c *gin.Context) {
 		entries = wrapper.Items
 	}
 	h.cfg.OAuthModelAlias = sanitizedOAuthModelAlias(entries)
-	h.persist(c)
+	h.persistLocked(c)
 }
 
 func (h *Handler) PatchOAuthModelAlias(c *gin.Context) {
+	h.reloadMu.Lock()
+	defer h.reloadMu.Unlock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	var body struct {
 		Provider *string                  `json:"provider"`
 		Channel  *string                  `json:"channel"`
@@ -1263,17 +1283,21 @@ func (h *Handler) PatchOAuthModelAlias(c *gin.Context) {
 		if len(h.cfg.OAuthModelAlias) == 0 {
 			h.cfg.OAuthModelAlias = nil
 		}
-		h.persist(c)
+		h.persistLocked(c)
 		return
 	}
 	if h.cfg.OAuthModelAlias == nil {
 		h.cfg.OAuthModelAlias = make(map[string][]config.OAuthModelAlias)
 	}
 	h.cfg.OAuthModelAlias[channel] = normalized
-	h.persist(c)
+	h.persistLocked(c)
 }
 
 func (h *Handler) DeleteOAuthModelAlias(c *gin.Context) {
+	h.reloadMu.Lock()
+	defer h.reloadMu.Unlock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	channel := strings.ToLower(strings.TrimSpace(c.Query("channel")))
 	if channel == "" {
 		channel = strings.ToLower(strings.TrimSpace(c.Query("provider")))
@@ -1294,15 +1318,19 @@ func (h *Handler) DeleteOAuthModelAlias(c *gin.Context) {
 	if len(h.cfg.OAuthModelAlias) == 0 {
 		h.cfg.OAuthModelAlias = nil
 	}
-	h.persist(c)
+	h.persistLocked(c)
 }
 
 // oauth-request-scoped-errors: map[string][]RequestScopedErrorRule
 func (h *Handler) GetOAuthRequestScopedErrors(c *gin.Context) {
-	c.JSON(200, gin.H{"oauth-request-scoped-errors": sanitizedOAuthRequestScopedErrors(h.cfg.OAuthRequestScopedErrors)})
+	c.JSON(200, gin.H{"oauth-request-scoped-errors": sanitizedOAuthRequestScopedErrors(h.configSnapshot().OAuthRequestScopedErrors)})
 }
 
 func (h *Handler) PutOAuthRequestScopedErrors(c *gin.Context) {
+	h.reloadMu.Lock()
+	defer h.reloadMu.Unlock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	data, err := c.GetRawData()
 	if err != nil {
 		c.JSON(400, gin.H{"error": "failed to read body"})
@@ -1320,10 +1348,14 @@ func (h *Handler) PutOAuthRequestScopedErrors(c *gin.Context) {
 		entries = wrapper.Items
 	}
 	h.cfg.OAuthRequestScopedErrors = sanitizedOAuthRequestScopedErrors(entries)
-	h.persist(c)
+	h.persistLocked(c)
 }
 
 func (h *Handler) PatchOAuthRequestScopedErrors(c *gin.Context) {
+	h.reloadMu.Lock()
+	defer h.reloadMu.Unlock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	var body struct {
 		Provider *string                         `json:"provider"`
 		Channel  *string                         `json:"channel"`
@@ -1360,17 +1392,21 @@ func (h *Handler) PatchOAuthRequestScopedErrors(c *gin.Context) {
 		if len(h.cfg.OAuthRequestScopedErrors) == 0 {
 			h.cfg.OAuthRequestScopedErrors = nil
 		}
-		h.persist(c)
+		h.persistLocked(c)
 		return
 	}
 	if h.cfg.OAuthRequestScopedErrors == nil {
 		h.cfg.OAuthRequestScopedErrors = make(map[string][]config.RequestScopedErrorRule)
 	}
 	h.cfg.OAuthRequestScopedErrors[channel] = normalized
-	h.persist(c)
+	h.persistLocked(c)
 }
 
 func (h *Handler) DeleteOAuthRequestScopedErrors(c *gin.Context) {
+	h.reloadMu.Lock()
+	defer h.reloadMu.Unlock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	channel := strings.ToLower(strings.TrimSpace(c.Query("channel")))
 	if channel == "" {
 		channel = strings.ToLower(strings.TrimSpace(c.Query("provider")))
@@ -1391,7 +1427,7 @@ func (h *Handler) DeleteOAuthRequestScopedErrors(c *gin.Context) {
 	if len(h.cfg.OAuthRequestScopedErrors) == 0 {
 		h.cfg.OAuthRequestScopedErrors = nil
 	}
-	h.persist(c)
+	h.persistLocked(c)
 }
 
 // codex-api-key: []CodexKey

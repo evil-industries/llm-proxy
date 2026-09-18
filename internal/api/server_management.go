@@ -107,6 +107,9 @@ func (s *Server) registerManagementRoutes() {
 
 		mgmt.GET("/logs", s.mgmt.GetLogs)
 		mgmt.DELETE("/logs", s.mgmt.DeleteLogs)
+		mgmt.GET("/request-logs", s.mgmt.ListRequestLogs)
+		mgmt.GET("/request-logs/:name", s.mgmt.GetRequestLogPreview)
+		mgmt.GET("/request-logs/:name/download", s.mgmt.DownloadRequestLog)
 		mgmt.GET("/request-error-logs", s.mgmt.GetRequestErrorLogs)
 		mgmt.GET("/request-error-logs/:name", s.mgmt.DownloadRequestErrorLog)
 		mgmt.GET("/request-log-by-id/:id", s.mgmt.GetRequestLogByID)
@@ -193,6 +196,9 @@ func (s *Server) registerManagementRoutes() {
 
 		mgmt.GET("/anthropic-auth-url", s.mgmt.RequestAnthropicToken)
 		mgmt.GET("/codex-auth-url", s.mgmt.RequestCodexToken)
+		mgmt.POST("/codex/device-auth", s.mgmt.StartCodexDeviceAuth)
+		mgmt.GET("/codex/device-auth", s.mgmt.GetCodexDeviceAuth)
+		mgmt.DELETE("/codex/device-auth", s.mgmt.CancelCodexDeviceAuth)
 		mgmt.GET("/antigravity-auth-url", s.mgmt.RequestAntigravityToken)
 		mgmt.GET("/kimi-auth-url", s.mgmt.RequestKimiToken)
 		mgmt.GET("/xai-auth-url", s.mgmt.RequestXAIToken)

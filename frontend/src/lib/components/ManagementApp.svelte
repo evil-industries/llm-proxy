@@ -1,4 +1,5 @@
 <script lang="ts">
+  import CodexDeviceAuth from '$lib/components/management/CodexDeviceAuth.svelte';
   import { onDestroy, onMount, untrack } from 'svelte';
   import { RefreshCw, LogOut, CircleHelp } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button/index.js';
@@ -14,14 +15,7 @@
     type AuthFile,
     type ManagementConfig
   } from '$lib/api';
-  import {
-    demoFiles,
-    demoKeys,
-    demoConfig,
-    demoLogs,
-    demoClient,
-    demoNotifications
-  } from '$lib/demo';
+  import { demoFiles, demoKeys, demoConfig, demoClient, demoNotifications } from '$lib/demo';
 
   let {
     initialDemo = false,
@@ -45,9 +39,9 @@
   let files = $state<AuthFile[]>(startInDemo ? structuredClone(demoFiles) : []);
   let keys = $state<string[]>(startInDemo ? [...demoKeys] : []);
   let config = $state<ManagementConfig>(startInDemo ? structuredClone(demoConfig) : {});
-  let lines = $state<string[]>(startInDemo ? [...demoLogs] : []);
   let view = $state<View>('Overview');
   let busy = $state(false);
+  let notificationSaving = $state(false);
   let signingOut = $state(false);
   let sessionExpired = $state(false);
   let errors = $state<Record<string, string>>({});
@@ -120,14 +114,6 @@
         }
       }
     ];
-    if (view === 'Logs')
-      jobs.push({
-        name: 'Logs',
-        run: () => activeClient.getLogs({ limit: 300 }, pending.signal),
-        apply: (value: unknown) => {
-          lines = (value as { lines: string[] }).lines ?? [];
-        }
-      });
     const results = await Promise.allSettled(jobs.map((job) => job.run()));
     if (pending.signal.aborted || client !== activeClient) return;
     const nextErrors = { ...errors };
@@ -150,7 +136,6 @@
     files = [];
     keys = [];
     config = {};
-    lines = [];
     errors = {};
   }
   async function signOut() {
@@ -174,8 +159,9 @@
     void refresh();
   });
   async function navigate(next: View) {
+    // Keep the notification form mounted until its save response has been applied.
+    if (notificationSaving) return;
     view = next;
-    if (next === 'Logs') await refresh();
   }
   onDestroy(() => {
     destroyed = true;
@@ -211,7 +197,7 @@
       <nav aria-label="Management sections">
         {#each views as item}<button
             class:active={view === item}
-            disabled={busy}
+            disabled={busy || notificationSaving}
             aria-current={view === item ? 'page' : undefined}
             onclick={() => navigate(item)}>{item}</button
           >{/each}
@@ -255,27 +241,35 @@
               {error} Previously loaded data may be out of date.
             </p>{/each}
         </div>{/if}
-      <div class="view-content" aria-busy={busy}>
+      <div class="view-content" aria-busy={busy || notificationSaving}>
         {#if !updated}<div class="panel empty-state" role="status">Loading your instance…</div>
-        {:else if view === 'Overview'}<Overview
+        {:else if view === 'Overview'}
+          {#if files.length === 0}<CodexDeviceAuth
+              {client}
+              disabled={demo || busy}
+              onconnected={refresh}
+            />{/if}
+          <Overview
             {files}
             keyCount={keys.length}
             strategy={config.routing?.strategy}
             oncredentials={() => navigate('Credentials')}
           />
-        {:else if view === 'Credentials'}<CredentialsPanel
-            {client}
-            data={files}
-            onrefresh={refresh}
-            disabled={demo || busy}
-          />
+        {:else if view === 'Credentials'}
+          <CodexDeviceAuth {client} disabled={demo || busy} onconnected={refresh} />
+          <CredentialsPanel {client} data={files} onrefresh={refresh} disabled={demo || busy} />
         {:else if view === 'API keys'}<KeysPanel
             {client}
             data={keys}
             onrefresh={refresh}
             disabled={demo || busy}
           />
-        {:else if view === 'Logs'}<LogsPanel {lines} />
+        {:else if view === 'Logs'}<LogsPanel
+            {client}
+            {config}
+            onrefresh={refresh}
+            disabled={demo}
+          />
         {:else}<SettingsPanel
             {client}
             data={config}
@@ -285,6 +279,7 @@
             {client}
             disabled={demo || busy}
             initialData={demo ? demoNotifications : undefined}
+            onsavingchange={(saving) => (notificationSaving = saving)}
           />{/if}
       </div>
       <div class="instance-footer">

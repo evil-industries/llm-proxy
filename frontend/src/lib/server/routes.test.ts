@@ -12,6 +12,9 @@ vi.mock('$app/environment', () => ({ dev: false }));
 vi.mock('$lib/server/auth', () => import('./auth'));
 vi.mock('$lib/server/config', () => import('./config'));
 vi.mock('$lib/server/relay', () => import('./relay'));
+vi.mock('$lib/server/device-auth', () => ({
+  deviceAuthSessions: { forget: vi.fn().mockResolvedValue(undefined) }
+}));
 import { GET, POST, DELETE } from '../../routes/api/session/+server';
 import { GET as managementGET } from '../../routes/api/management/[...path]/+server';
 import { handle } from '../../hooks.server';

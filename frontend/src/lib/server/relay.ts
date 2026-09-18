@@ -1,5 +1,6 @@
 import type { ServerConfiguration } from './config';
 import { sameOrigin } from './auth';
+import { managementFetch } from './management-fetch';
 
 const METHODS: Record<string, readonly string[]> = {
   config: ['GET'],
@@ -8,6 +9,7 @@ const METHODS: Record<string, readonly string[]> = {
   'api-keys': ['GET', 'PUT', 'PATCH', 'DELETE'],
   'api-keys/mutate': ['POST'],
   logs: ['GET'],
+  'request-logs': ['GET'],
   notifications: ['GET', 'PUT'],
   'notifications/test': ['POST'],
   'routing/strategy': ['GET', 'PUT'],
@@ -60,9 +62,25 @@ export async function boundedBody(
   return result;
 }
 
+function logRoute(path: string): { upstream: string; download: boolean } | undefined {
+  const parts = path.split('/');
+  if (parts[0] !== 'request-logs' || (parts.length !== 2 && parts.length !== 3)) return;
+  const name = parts[1];
+  if (!name || !name.endsWith('.log') || /[\\?\x00-\x1f\x7f]/.test(name)) return;
+  if (parts.length === 3 && parts[2] !== 'download') return;
+  return {
+    upstream: `request-logs/${encodeURIComponent(name)}${parts.length === 3 ? '/download' : ''}`,
+    download: parts.length === 3
+  };
+}
+
 function validQuery(path: string, method: string, params: URLSearchParams): boolean {
-  const allowed =
-    path === 'logs'
+  const file = logRoute(path);
+  const allowed = file
+    ? file.download
+      ? []
+      : ['offset', 'limit']
+    : path === 'logs'
       ? ['limit', 'cursor', 'after']
       : path === 'auth-files' && method === 'GET'
         ? ['name', 'auth_index']
@@ -82,11 +100,15 @@ export async function relayManagement(
   request: Request,
   path: string,
   config: ServerConfiguration,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = managementFetch
 ): Promise<Response> {
   const url = new URL(request.url);
   const method = request.method;
-  if (!Object.hasOwn(METHODS, path) || !METHODS[path].includes(method))
+  const file = logRoute(path);
+  if (
+    !(file && method === 'GET') &&
+    (!Object.hasOwn(METHODS, path) || !METHODS[path].includes(method))
+  )
     return safeJSON({ error: 'Management endpoint is not available.' }, 404);
   if (method !== 'GET' && !sameOrigin(request, url))
     return safeJSON({ error: 'Request origin was not accepted.' }, 403);
@@ -121,7 +143,10 @@ export async function relayManagement(
       cache: 'no-store',
       signal: request.signal
     };
-    const upstream = await fetcher(`${config.managementURL}/${path}${url.search}`, init);
+    const upstream = await fetcher(
+      `${config.managementURL}/${file?.upstream ?? path}${url.search}`,
+      init
+    );
     if (!upstream.ok) {
       await upstream.body?.cancel();
       const status =
@@ -129,6 +154,16 @@ export async function relayManagement(
           ? 502
           : upstream.status;
       return safeJSON({ error: 'The proxy server could not complete this request.' }, status);
+    }
+    if (file?.download) {
+      const name = path.split('/')[1];
+      const responseHeaders = new Headers({
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+        'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff'
+      });
+      return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
     }
     if (upstream.status === 204)
       return new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } });

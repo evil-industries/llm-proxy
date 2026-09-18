@@ -72,7 +72,7 @@
       <h2 id="credentials-title">Provider credentials</h2>
       <p class="muted">Manage the accounts available to your proxy.</p>
     </div>
-    <Button disabled={disabled || busy} onclick={() => uploadInput.click()}
+    <Button variant="outline" disabled={disabled || busy} onclick={() => uploadInput.click()}
       ><Upload size={15} /> Upload JSON</Button
     >
     <input
@@ -113,7 +113,7 @@
       <p>
         {data.length
           ? 'Try another search or provider.'
-          : 'Upload a provider credential JSON file to start routing requests.'}
+          : 'Connect a Codex account above, or import a provider credential JSON file.'}
       </p>
     </div>
   {:else}

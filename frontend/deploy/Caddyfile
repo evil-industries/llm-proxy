@@ -1,0 +1,29 @@
+{
+	admin off
+	auto_https off
+	servers {
+		trusted_proxies static {$CADDY_TRUSTED_PROXIES:127.0.0.1/32 ::1/128}
+		trusted_proxies_strict
+	}
+}
+
+{$CADDY_LISTEN::8080} {
+	# The outer reverse proxy terminates HTTPS. This listener stays private.
+	@blocked path /v0 /v0/* /management.html
+	handle @blocked {
+		respond 404
+	}
+
+	@inference path /v1 /v1/* /v1beta /v1beta/* /openai/v1 /openai/v1/* /backend-api/codex /backend-api/codex/*
+	handle @inference {
+		reverse_proxy {$GATEWAY_UPSTREAM:cli-proxy-api:8317} {
+			header_up X-Forwarded-For {client_ip}
+		}
+	}
+
+	handle {
+		reverse_proxy {$MANAGEMENT_UPSTREAM:management:3000} {
+			header_up X-Forwarded-For {client_ip}
+		}
+	}
+}

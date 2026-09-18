@@ -140,3 +140,34 @@ export interface LogsQuery {
   cursor?: string;
   after?: number;
 }
+
+export interface CodexDeviceAuth {
+  status: 'idle' | 'pending' | 'complete' | 'error' | 'expired' | 'cancelled';
+  verification_uri?: string;
+  user_code?: string;
+  expires_at?: string;
+  interval?: number;
+  account?: { name: string; email?: string; plan_type?: string };
+  error?: string;
+}
+
+export interface RequestLogFile {
+  name: string;
+  size: number;
+  modified: number;
+  kind: 'request' | 'error';
+}
+
+export interface RequestLogPreviewQuery {
+  offset?: number;
+  limit?: number;
+}
+
+export interface RequestLogPreview {
+  name: string;
+  text: string;
+  next_offset: number;
+  size: number;
+  modified: number;
+  has_more: boolean;
+}

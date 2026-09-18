@@ -88,11 +88,13 @@ func parseLastRefreshValue(v any) (time.Time, bool) {
 }
 
 func (h *Handler) ListAuthFiles(c *gin.Context) {
+	manager := h.authManagerSnapshot()
+
 	if h == nil {
 		c.JSON(500, gin.H{"error": "handler not initialized"})
 		return
 	}
-	if h.authManager == nil {
+	if manager == nil {
 		h.listAuthFilesFromDisk(c)
 		return
 	}
@@ -105,9 +107,9 @@ func (h *Handler) ListAuthFiles(c *gin.Context) {
 	if host != nil {
 		quotaSupportedProviders = host.QuotaSupportedProvidersSet(c.Request.Context())
 	}
-	auths := h.authManager.List()
+	auths := manager.List()
 	observedAt := time.Now().UTC()
-	cooldownsKnown := !h.authManager.HomeEnabled()
+	cooldownsKnown := !manager.HomeEnabled()
 	files := make([]gin.H, 0, len(auths))
 	for _, auth := range auths {
 		if !matchesAuthFileLookup(auth, nameFilter, authIndexFilter) {
@@ -152,16 +154,18 @@ func matchesAuthFileLookup(auth *coreauth.Auth, name string, authIndex string) b
 }
 
 func (h *Handler) lookupAuthFile(name string, authIndex string) (*coreauth.Auth, bool) {
+	manager := h.authManagerSnapshot()
+
 	name = strings.TrimSpace(name)
 	authIndex = strings.TrimSpace(authIndex)
-	if h == nil || h.authManager == nil || name == "" {
+	if h == nil || manager == nil || name == "" {
 		return nil, false
 	}
 	if authIndex == "" {
-		if auth, ok := h.authManager.GetByID(name); ok {
+		if auth, ok := manager.GetByID(name); ok {
 			return auth, true
 		}
-		auths := h.authManager.List()
+		auths := manager.List()
 		for _, auth := range auths {
 			if auth != nil && strings.TrimSpace(auth.FileName) == name {
 				return auth, true
@@ -169,7 +173,7 @@ func (h *Handler) lookupAuthFile(name string, authIndex string) (*coreauth.Auth,
 		}
 		return nil, false
 	}
-	auths := h.authManager.List()
+	auths := manager.List()
 	for _, auth := range auths {
 		if matchesAuthFileLookup(auth, name, authIndex) {
 			return auth, true
@@ -180,6 +184,8 @@ func (h *Handler) lookupAuthFile(name string, authIndex string) (*coreauth.Auth,
 
 // GetAuthFileModels returns the models supported by a specific auth file
 func (h *Handler) GetAuthFileModels(c *gin.Context) {
+	manager := h.authManagerSnapshot()
+
 	name := c.Query("name")
 	if name == "" {
 		c.JSON(400, gin.H{"error": "name is required"})
@@ -188,8 +194,8 @@ func (h *Handler) GetAuthFileModels(c *gin.Context) {
 
 	// Try to find auth ID via authManager
 	var authID string
-	if h.authManager != nil {
-		auths := h.authManager.List()
+	if manager != nil {
+		auths := manager.List()
 		for _, auth := range auths {
 			if auth.FileName == name || auth.ID == name {
 				authID = auth.ID
@@ -228,10 +234,12 @@ func (h *Handler) GetAuthFileModels(c *gin.Context) {
 
 // List auth files from disk when the auth manager is unavailable.
 func (h *Handler) listAuthFilesFromDisk(c *gin.Context) {
+	cfg := h.configSnapshot()
+
 	observedAt := time.Now().UTC()
 	nameFilter := strings.TrimSpace(c.Query("name"))
 	authIndexFilter := strings.TrimSpace(c.Query("auth_index"))
-	entries, err := os.ReadDir(h.cfg.AuthDir)
+	entries, err := os.ReadDir(cfg.AuthDir)
 	if err != nil {
 		c.JSON(500, gin.H{"error": fmt.Sprintf("failed to read auth dir: %v", err)})
 		return
@@ -256,7 +264,7 @@ func (h *Handler) listAuthFilesFromDisk(c *gin.Context) {
 			fileData := gin.H{"name": name, "size": info.Size(), "modtime": info.ModTime(), "cooldowns": nil}
 
 			// Read file to get type field
-			full := filepath.Join(h.cfg.AuthDir, name)
+			full := filepath.Join(cfg.AuthDir, name)
 			if data, errRead := os.ReadFile(full); errRead == nil {
 				typeValue := gjson.GetBytes(data, "type").String()
 				emailValue := gjson.GetBytes(data, "email").String()

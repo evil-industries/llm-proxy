@@ -14,6 +14,7 @@ ENV NODE_ENV=production \
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 COPY --from=build --chown=node:node /app/build ./build
+COPY --chown=node:node server.mjs ./server.mjs
 USER node
 EXPOSE 3000
-CMD ["node", "build"]
+CMD ["node", "server.mjs"]

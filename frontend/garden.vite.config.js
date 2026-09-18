@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { svelte, vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
+import { sanitizeGardenImports } from './scripts/garden-generated.mjs';
 
 const rootPath = (path) => fileURLToPath(new URL(path, import.meta.url));
 
@@ -28,9 +29,28 @@ function gardenStartup() {
   };
 }
 
+/** @returns {import('vite').Plugin} */
+function gardenGeneratedBindings() {
+  const files = new Set(
+    ['component_import_map.js', 'raw_component_import_map.js', 'das_import_map.js'].map((file) =>
+      rootPath(`./.garden/${file}`)
+    )
+  );
+  return {
+    name: 'garden-valid-import-bindings',
+    enforce: 'pre',
+    transform(code, id) {
+      if (!files.has(id.split('?')[0])) return;
+      const transformed = sanitizeGardenImports(code);
+      return transformed === code ? undefined : { code: transformed, map: null };
+    }
+  };
+}
+
 export default defineConfig({
   plugins: [
     gardenStartup(),
+    gardenGeneratedBindings(),
     tailwindcss(),
     svelte({ configFile: false, preprocess: vitePreprocess() })
   ],

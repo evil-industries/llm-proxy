@@ -76,8 +76,12 @@ func quotaObservations(accounts []*auth.Auth, now time.Time) []observation {
 				if !valid || (!reset.IsZero() && !reset.After(now)) {
 					continue
 				}
+				windowKey := window
+				if provider == "codex" {
+					windowKey, window = codexQuotaWindow(signals, window)
+				}
 				item := observation{
-					key: identity + "\x00" + window, provider: provider, account: label,
+					key: identity + "\x00" + windowKey, provider: provider, account: label,
 					window: window, remaining: 100 * (1 - used/scale), observed: quota.ObservedAt, reset: reset,
 				}
 				previous, exists := latest[item.key]
@@ -93,6 +97,36 @@ func quotaObservations(accounts []*auth.Auth, now time.Time) []observation {
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].key < result[j].key })
 	return result
+}
+
+// codexQuotaWindow separates metered pools from their primary/secondary window.
+// Explicit limit names join HTTP namespaces and websocket additional limits;
+// unknown aliases remain separate rather than guessing from a model name.
+func codexQuotaWindow(signals map[string]string, window string) (string, string) {
+	var pool, period string
+	if window == "primary" || window == "secondary" {
+		pool = strings.ToLower(strings.TrimSpace(signals["x-codex-active-limit"]))
+		if pool == "" {
+			return window, window
+		}
+		pool = strings.TrimPrefix(pool, "codex_")
+		period = window
+	} else {
+		for _, suffix := range []string{"-primary", "-secondary"} {
+			if strings.HasSuffix(window, suffix) {
+				pool = strings.TrimSuffix(window, suffix)
+				period = strings.TrimPrefix(suffix, "-")
+				break
+			}
+		}
+		if pool == "" {
+			return window, window
+		}
+	}
+	if name := strings.TrimSpace(signals["x-codex-"+pool+"-limit-name"]); name != "" {
+		return "name\x00" + strings.ToLower(name) + "\x00" + period, name + " " + period
+	}
+	return "pool\x00" + pool + "\x00" + period, pool + "-" + period
 }
 
 func quotaReset(signals map[string]string, prefix, provider string, observed time.Time) (time.Time, bool) {
