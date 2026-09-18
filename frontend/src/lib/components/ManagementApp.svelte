@@ -180,7 +180,6 @@
 <div class="app-shell">
   <header class="topbar">
     <div class="topbar-inner">
-      <span class="workspace">Management</span>
       {#if client}
         <nav aria-label="Management sections">
           {#each views as item}<button
@@ -316,10 +315,6 @@
     flex-wrap: wrap;
     gap: 0 32px;
   }
-  .workspace {
-    font-weight: 650;
-    letter-spacing: -0.3px;
-  }
   .topbar-actions {
     margin-left: auto;
     padding-block: 10px;
@@ -420,8 +415,6 @@
       gap: 0 24px;
     }
     nav {
-      order: 3;
-      flex-basis: 100%;
       gap: 0 24px;
     }
     nav button {
