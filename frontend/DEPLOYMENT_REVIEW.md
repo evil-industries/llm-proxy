@@ -27,7 +27,7 @@ No remaining actionable blocker was found for these features. No real provider a
 - Removed implicit five-minute management upload/response deadlines while retaining connection acquisition and HTTP-header protection.
 - Updated the vulnerable cookie serializer, Go Git/SSH dependencies, and compression dependency. Adjusted Git corruption detection for the patched library's missing-pack errors without treating missing configuration or credential files as corruption.
 - Corrected two scheduling-sensitive WebSocket tests using explicit synchronization.
-- Added an isolated, repeatable Compose smoke test and a deployment CI workflow.
+- Added an isolated, repeatable Compose smoke test. GitHub Actions workflows are removed; validation runs locally.
 
 ## Verification
 
