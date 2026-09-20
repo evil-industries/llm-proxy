@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementevents"
 	"net/http"
 	"strings"
 	"sync"
@@ -135,6 +136,7 @@ func (h *Handler) runCodexDeviceAuth(ctx context.Context, flow *codexDeviceFlow,
 		close(flow.done)
 		h.deviceFlowsMu.Unlock()
 	}()
+	defer managementevents.Publish(managementevents.DeviceAuth)
 	defer flow.cancel()
 	bundle, err := service.Complete(ctx, challenge, func(interval time.Duration) {
 		flow.mu.Lock()

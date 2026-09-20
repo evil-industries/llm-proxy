@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementevents"
 	"strings"
 	"sync"
 	"time"
@@ -77,6 +78,7 @@ func (m *Manager) UnregisterExecutor(provider string) {
 
 // Register inserts a new auth entry into the manager.
 func (m *Manager) Register(ctx context.Context, auth *Auth) (*Auth, error) {
+	defer managementevents.Publish(managementevents.Accounts)
 	if auth == nil {
 		return nil, nil
 	}
@@ -157,6 +159,7 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 }
 
 func (m *Manager) updateInternal(ctx context.Context, base, auth *Auth, mode updateAuthMode) (*Auth, error) {
+	defer managementevents.Publish(managementevents.Accounts)
 	if auth == nil || auth.ID == "" {
 		return nil, nil
 	}
@@ -281,6 +284,7 @@ func (m *Manager) updateInternal(ctx context.Context, base, auth *Auth, mode upd
 // Remove deletes an auth from runtime state without persisting.
 // Disk and token-store deletion must be handled by the caller.
 func (m *Manager) Remove(ctx context.Context, id string) {
+	defer managementevents.Publish(managementevents.Accounts)
 	if m == nil {
 		return
 	}

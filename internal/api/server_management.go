@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementevents"
 	"net/http"
 	"os"
 	"strings"
@@ -26,7 +27,14 @@ func (s *Server) registerManagementRoutes() {
 
 	mgmt := s.engine.Group("/v0/management")
 	mgmt.Use(s.managementAvailabilityMiddleware(), s.mgmt.Middleware())
+	mgmt.Use(func(c *gin.Context) {
+		c.Next()
+		if c.Request.Method != http.MethodGet && c.Writer.Status() < 400 {
+			managementevents.Publish(managementevents.Config | managementevents.Accounts | managementevents.DeviceAuth)
+		}
+	})
 	{
+		mgmt.GET("/events", s.mgmt.Events)
 		mgmt.GET("/config", s.mgmt.GetConfig)
 		mgmt.GET("/config.yaml", s.mgmt.GetConfigYAML)
 		mgmt.PUT("/config.yaml", s.mgmt.PutConfigYAML)

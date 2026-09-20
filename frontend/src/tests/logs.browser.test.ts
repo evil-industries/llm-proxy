@@ -1,3 +1,4 @@
+import { MockEventSource } from './realtime-fixture';
 import { expect, test, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
@@ -15,11 +16,6 @@ function logBatch(start: number, count: number, cursor: string) {
 }
 function fixture(lines = ['[info] first request', '[error] failed request']) {
   const requests: URL[] = [];
-  let poll: () => void = () => {};
-  vi.spyOn(window, 'setInterval').mockImplementation(((callback: () => void) => {
-    poll = callback;
-    return 12345;
-  }) as typeof window.setInterval);
   const get = vi.fn(async (url: URL): Promise<Response> => {
     if (url.pathname.endsWith('/request-logs')) return Response.json({ files: [file] });
     if (url.pathname.includes('/request-logs/')) {
@@ -45,7 +41,7 @@ function fixture(lines = ['[info] first request', '[error] failed request']) {
     requests.push(url);
     return get(url);
   });
-  return { client, requests, get, poll: () => poll() };
+  return { client, requests, get, poll: () => MockEventSource.emit(4) };
 }
 
 test('filters loaded history and opens full log details with keyboard and restores focus', async () => {
@@ -76,7 +72,7 @@ test('filters loaded history and opens full log details with keyboard and restor
   await expect.element(row).toHaveFocus();
 });
 
-test('polls from the returned cursor, pauses, retains history after errors and marks cursor resets', async () => {
+test('updates on push events from the returned cursor, pauses, retains history after errors and marks cursor resets', async () => {
   const state = fixture();
   render(LogsPanel, { client: state.client });
   await expect.element(page.getByRole('button', { name: 'Inspect log line 1' })).toBeVisible();
@@ -356,7 +352,7 @@ test('copies the current page and announces detail copy results inside the dialo
     .toHaveTextContent('Copied to clipboard.');
 });
 
-test('drains a large backlog serially without another polling tick and keeps rendering paginated', async () => {
+test('drains a large backlog serially without another push event and keeps rendering paginated', async () => {
   const state = fixture();
   render(LogsPanel, { client: state.client });
   await expect.element(page.getByText('[info] first request', { exact: true })).toBeVisible();
@@ -377,7 +373,7 @@ test('drains a large backlog serially without another polling tick and keeps ren
   expect(state.requests).toHaveLength(3);
   release();
   await expect.element(page.getByText('[info] backlog 2500', { exact: true })).toBeVisible();
-  await expect.element(page.getByText('Live · 5 seconds', { exact: true })).toBeVisible();
+  await expect.element(page.getByText('Live updates', { exact: true })).toBeVisible();
   expect(state.requests).toHaveLength(4);
   expect(state.requests.slice(1).map((url) => url.searchParams.get('cursor'))).toEqual([
     'cursor-1',

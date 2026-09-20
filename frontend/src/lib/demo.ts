@@ -21,6 +21,15 @@ export const demoFiles: AuthFile[] = [
   {
     name: 'anthropic-team.json',
     provider: 'claude',
+    quota: {
+      observed_at: new Date().toISOString(),
+      signals: {
+        'anthropic-ratelimit-unified-5h-utilization': '0.32',
+        'anthropic-ratelimit-unified-5h-reset': String(Math.floor(Date.now() / 1000) + 7200),
+        'anthropic-ratelimit-unified-7d-utilization': '0.58',
+        'anthropic-ratelimit-unified-7d-reset': String(Math.floor(Date.now() / 1000) + 172800)
+      }
+    },
     email: 'team@example.com',
     status: 'ready',
     disabled: false,
@@ -40,6 +49,17 @@ export const demoFiles: AuthFile[] = [
   {
     name: 'codex-workspace.json',
     provider: 'codex',
+    quota: {
+      observed_at: new Date().toISOString(),
+      signals: {
+        'x-codex-primary-used-percent': '24',
+        'x-codex-primary-window-minutes': '300',
+        'x-codex-primary-reset-at': String(Math.floor(Date.now() / 1000) + 3600),
+        'x-codex-secondary-used-percent': '87',
+        'x-codex-secondary-window-minutes': '10080',
+        'x-codex-secondary-reset-at': String(Math.floor(Date.now() / 1000) + 259200)
+      }
+    },
     email: 'workspace@example.com',
     status: 'ready',
     disabled: false,

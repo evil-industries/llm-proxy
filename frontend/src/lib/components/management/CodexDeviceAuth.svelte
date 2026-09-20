@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { subscribeChanges, Changes } from '$lib/realtime';
   import { Check, Copy, ExternalLink, KeyRound, LoaderCircle } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button/index.js';
   import { Badge } from '$lib/components/ui/badge/index.js';
@@ -10,10 +11,12 @@
   let {
     client,
     disabled = false,
+    live = true,
     onconnected = async () => {}
   }: {
     client: ManagementClient;
     disabled?: boolean;
+    live?: boolean;
     onconnected?: () => Promise<void>;
   } = $props();
 
@@ -27,7 +30,7 @@
   let now = $state(Date.now());
   let disposed = false;
   let controller: AbortController | undefined;
-  let poll: ReturnType<typeof setTimeout> | undefined;
+  let queued = false;
   const pending = $derived(flow?.status === 'pending');
   const complete = $derived(flow?.status === 'complete');
   const expiry = $derived(flow?.expires_at ? Date.parse(flow.expires_at) : NaN);
@@ -40,13 +43,6 @@
       : `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`
   );
 
-  function schedule() {
-    clearTimeout(poll);
-    if (!disposed && (pending || uncertain)) {
-      poll = setTimeout(() => void perform('load'), Math.max(1, flow?.interval ?? 5) * 1000);
-    }
-  }
-
   async function refreshAccounts() {
     refreshFailed = false;
     try {
@@ -58,7 +54,6 @@
 
   async function perform(operation: 'load' | 'start' | 'cancel') {
     if (busy || disposed) return;
-    clearTimeout(poll);
     busy = operation;
     notice = '';
     controller = new AbortController();
@@ -85,17 +80,20 @@
         uncertain = true;
         notice =
           operation === 'cancel'
-            ? 'Cancellation could not be confirmed. Checking the connection again.'
+            ? 'Cancellation could not be confirmed. Check the connection again to confirm.'
             : operation === 'start'
-              ? 'The connection request could not be confirmed. Checking its status before trying again.'
+              ? 'The connection request could not be confirmed. Checking its status requires another connection check.'
               : pending
-                ? 'Unable to check the connection. Your approval request has been kept. Retrying automatically.'
-                : 'Unable to check connection status. Retrying automatically; you can also check again below.';
+                ? 'Unable to check the connection. Your approval request has been kept. Check again or wait for a live update.'
+                : 'Unable to check connection status. Check again below or wait for a live update.';
       }
     } finally {
       if (!disposed) {
         busy = null;
-        schedule();
+        if (queued) {
+          queued = false;
+          void perform('load');
+        }
       }
     }
   }
@@ -113,12 +111,19 @@
 
   onMount(() => {
     void perform('load');
+    const unsubscribe = !live
+      ? () => {}
+      : subscribeChanges((topics) => {
+          if (!(topics & Changes.deviceAuth)) return;
+          if (busy) queued = true;
+          else void perform('load');
+        });
     const clock = setInterval(() => {
       now = Date.now();
     }, 1000);
     return () => {
       disposed = true;
-      clearTimeout(poll);
+      unsubscribe();
       clearInterval(clock);
       controller?.abort();
       // Leaving the page only stops this view; the server retains the flow.

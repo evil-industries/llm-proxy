@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
+  import { subscribeChanges, Changes } from '$lib/realtime';
   import {
     Copy,
     Download,
@@ -22,7 +23,6 @@
     LOG_LEVELS,
     LOG_PAGE_SIZE,
     LOG_FETCH_SIZE,
-    LOG_POLL_INTERVAL,
     fileSize,
     filterLogs,
     logLevel,
@@ -57,7 +57,9 @@
   let page = $state(0);
   let sequence = 0;
   let controller: AbortController;
-  let alive = false;
+  let alive = $state(false);
+  let queued = false;
+  let filesQueued = false;
   const loggingDisabled = $derived(config['logging-to-file'] === false);
   const filtered = $derived(filterLogs(entries, query, severity));
   const pageCount = $derived(Math.max(1, Math.ceil(filtered.length / LOG_PAGE_SIZE)));
@@ -99,6 +101,7 @@
     notice = '';
     try {
       do {
+        queued = false;
         const requestCursor = !latest ? cursor : '';
         const limit = requestCursor ? LOG_FETCH_SIZE : LOG_PAGE_SIZE;
         const data = await client.getLogs(
@@ -161,7 +164,13 @@
         paused = true;
       }
     } finally {
-      if (alive) busy = false;
+      if (alive) {
+        busy = false;
+        if (queued) {
+          queued = false;
+          liveUpdate(Changes.logs);
+        }
+      }
     }
   }
   async function togglePaused() {
@@ -194,7 +203,13 @@
     } catch (cause) {
       if (!controller.signal.aborted) filesError = message(cause);
     } finally {
-      if (alive) filesBusy = false;
+      if (alive) {
+        filesBusy = false;
+        if (filesQueued) {
+          filesQueued = false;
+          liveUpdate(Changes.requestLogs);
+        }
+      }
     }
   }
   async function preview(name: string, more = false) {
@@ -288,26 +303,35 @@
     anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
+  function liveUpdate(topics: number) {
+    if (!alive || disabled || document.visibilityState === 'hidden') return;
+    if (topics & Changes.logs && tab === 'server' && !paused && !loggingDisabled) {
+      if (busy) queued = true;
+      else void load();
+    }
+    if (topics & Changes.requestLogs && tab === 'requests') {
+      if (filesBusy) filesQueued = true;
+      else void loadFiles();
+    }
+  }
   onMount(() => {
     alive = true;
     controller = new AbortController();
-    void load();
-    const timer = setInterval(() => {
-      if (
-        tab === 'server' &&
-        !paused &&
-        !disabled &&
-        !loggingDisabled &&
-        document.visibilityState !== 'hidden'
-      )
-        void load();
-    }, LOG_POLL_INTERVAL);
+    const unsubscribe = disabled ? () => {} : subscribeChanges(liveUpdate);
+    const visible = () => {
+      if (document.visibilityState !== 'hidden') liveUpdate(Changes.logs | Changes.requestLogs);
+    };
+    document.addEventListener('visibilitychange', visible);
     return () => {
       alive = false;
-      clearInterval(timer);
+      unsubscribe();
+      document.removeEventListener('visibilitychange', visible);
       controller.abort();
       previewController?.abort();
     };
+  });
+  $effect(() => {
+    if (tab === 'server' && !loggingDisabled && alive) untrack(() => liveUpdate(Changes.logs));
   });
   $effect(() => {
     if (tab === 'requests' && !filesLoaded && !filesBusy && !filesError && alive) void loadFiles();
@@ -398,7 +422,7 @@
                 ? 'Catching up…'
                 : busy
                   ? 'Loading'
-                  : 'Live · 5 seconds'}</Badge
+                  : 'Live updates'}</Badge
         >
       </div>
       {#if error}<div class="error-banner log-message" role="alert">

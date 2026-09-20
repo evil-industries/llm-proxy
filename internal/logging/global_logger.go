@@ -3,6 +3,7 @@ package logging
 import (
 	"bytes"
 	"fmt"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementevents"
 	"io"
 	"os"
 	"path/filepath"
@@ -207,7 +208,7 @@ func ConfigureLogOutput(cfg *config.Config) error {
 			MaxAge:     0,
 			Compress:   false,
 		}
-		log.SetOutput(logWriter)
+		log.SetOutput(eventLogWriter{logWriter})
 	} else {
 		if logWriter != nil {
 			_ = logWriter.Close()
@@ -238,4 +239,15 @@ func closeLogOutputs() {
 		_ = ginErrorWriter.Close()
 		ginErrorWriter = nil
 	}
+}
+
+// Notify only after bytes reach disk, so cursor reads can immediately see them.
+type eventLogWriter struct{ io.Writer }
+
+func (w eventLogWriter) Write(p []byte) (int, error) {
+	n, err := w.Writer.Write(p)
+	if n > 0 {
+		managementevents.Publish(managementevents.Logs)
+	}
+	return n, err
 }

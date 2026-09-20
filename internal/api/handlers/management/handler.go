@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"fmt"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementevents"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -38,6 +39,9 @@ const attemptMaxIdleTime = 2 * time.Hour
 
 // Handler aggregates config reference, persistence path and helpers.
 type Handler struct {
+	eventsMu                sync.Mutex
+	eventsClosed            bool
+	eventStreams            map[chan struct{}]struct{}
 	cfg                     *config.Config
 	configFilePath          string
 	mu                      sync.Mutex
@@ -136,6 +140,7 @@ func (h *Handler) SetConfig(cfg *config.Config) {
 	h.mu.Lock()
 	h.cfg = cfg
 	h.mu.Unlock()
+	managementevents.Publish(managementevents.Config)
 }
 
 // configSnapshot gives readers an independent view while configuration is replaced

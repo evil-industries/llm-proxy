@@ -1,6 +1,5 @@
 export const LOG_PAGE_SIZE = 200;
 export const LOG_FETCH_SIZE = 1000;
-export const LOG_POLL_INTERVAL = 5000;
 export const LOG_LEVELS = ['error', 'warn', 'info', 'debug', 'trace', 'other'] as const;
 export type LogLevel = (typeof LOG_LEVELS)[number];
 export interface LogEntry {

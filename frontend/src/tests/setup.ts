@@ -1,6 +1,9 @@
 import '../app.css';
 import 'vitest-browser-svelte';
-import { afterEach, vi } from 'vitest';
+import { afterEach, beforeEach, vi } from 'vitest';
+
+import { mockRealtime } from './realtime-fixture';
+beforeEach(mockRealtime);
 
 afterEach(() => {
   vi.unstubAllGlobals();

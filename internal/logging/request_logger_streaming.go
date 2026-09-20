@@ -3,6 +3,7 @@ package logging
 import (
 	"bytes"
 	"fmt"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementevents"
 	"os"
 	"time"
 
@@ -226,6 +227,7 @@ func (w *FileStreamingLogWriter) Close() error {
 	}
 
 	writeErr := w.writeFinalLog(logFile)
+	defer managementevents.Publish(managementevents.RequestLogs)
 	if errClose := logFile.Close(); errClose != nil {
 		log.WithError(errClose).Warn("failed to close request log file")
 		if writeErr == nil {
