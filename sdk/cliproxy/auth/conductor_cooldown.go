@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementevents"
 	"io"
 	"net"
 	"net/http"
@@ -741,6 +742,7 @@ func cooldownReason(statusMessage string, quota QuotaState, lastErr *Error) stri
 
 // MarkResult records an execution result and notifies hooks.
 func (m *Manager) MarkResult(ctx context.Context, result Result) {
+	defer managementevents.Publish(managementevents.Accounts)
 	if result.AuthID == "" {
 		return
 	}

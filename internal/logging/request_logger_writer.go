@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementevents"
 	"io"
 	"os"
 	"path/filepath"
@@ -162,6 +163,7 @@ func (l *FileRequestLogger) logRequestWithSources(url, method string, requestHea
 		requestTimestamp,
 		apiResponseTimestamp,
 	)
+	defer managementevents.Publish(managementevents.RequestLogs)
 	if errClose := logFile.Close(); errClose != nil {
 		log.WithError(errClose).Warn("failed to close request log file")
 		if writeErr == nil {

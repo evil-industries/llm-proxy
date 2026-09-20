@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AccountQuota from './AccountQuota.svelte';
   import { Search, Upload, Trash2, KeyRound } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button/index.js';
   import { Input } from '$lib/components/ui/input/index.js';
@@ -166,6 +167,7 @@
                 ><Trash2 size={15} /></Button
               >{/if}
           </div>
+          <AccountQuota {file} />
           {#if !file.runtime_only && deleting === (file.auth_index || file.name)}<div
               class="delete-confirmation"
             >

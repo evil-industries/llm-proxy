@@ -38,6 +38,7 @@ const (
 // points at the latest complete log boundary; combining after with limit is
 // therefore tail semantics and does not replay lines trimmed by limit.
 func (h *Handler) GetLogs(c *gin.Context) {
+	logging.SkipGinRequestLogging(c)
 	cfg := h.configSnapshot()
 
 	if h == nil {

@@ -1,3 +1,4 @@
+import { MockEventSource } from './realtime-fixture';
 import { expect, test, vi } from 'vitest';
 import { commands, page, userEvent } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
@@ -91,7 +92,8 @@ test('does not overlap status requests and only aborts the view when unmounted',
   await expect.element(page.getByLabelText('One-time device code')).toBeVisible();
   const next = deferred<DeviceAuth>();
   get.mockImplementationOnce(() => next.promise);
-  await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(2), { timeout: 2500 });
+  MockEventSource.emit(16);
+  await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(2));
   await expect.element(page.getByRole('button', { name: 'Check connection' })).toBeDisabled();
   const signal = get.mock.calls[1][0];
   await view.unmount();

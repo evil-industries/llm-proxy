@@ -41,6 +41,7 @@ const digest = (value: string) => createHash('sha256').update(value).digest('hex
 /** Single-process session storage. Expiration is checked on every access; no timers. */
 export class AuthStore {
   private sessions = new Map<string, number>();
+  private watchers = new Map<string, Set<() => void>>();
   private attempts = new Map<string, { count: number; expires: number }>();
   constructor(private readonly now: () => number = Date.now) {}
 
@@ -85,8 +86,30 @@ export class AuthStore {
     return this.authenticated(token) ? digest(token!) : undefined;
   }
 
+  /** Close long-lived streams at expiry or revocation without polling session state. */
+  watch(identity: string, close: () => void): () => void {
+    const expires = this.sessions.get(identity);
+    if (!expires || expires <= this.now()) {
+      close();
+      return () => {};
+    }
+    let watchers = this.watchers.get(identity);
+    if (!watchers) this.watchers.set(identity, (watchers = new Set()));
+    watchers.add(close);
+    const timer = setTimeout(close, expires - this.now());
+    return () => {
+      clearTimeout(timer);
+      watchers.delete(close);
+      if (!watchers.size) this.watchers.delete(identity);
+    };
+  }
+
   revoke(token: string | undefined) {
-    if (token) this.sessions.delete(digest(token));
+    if (!token) return;
+    const identity = digest(token);
+    this.sessions.delete(identity);
+    for (const close of this.watchers.get(identity) ?? []) close();
+    this.watchers.delete(identity);
   }
 }
 

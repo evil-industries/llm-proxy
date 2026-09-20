@@ -3,6 +3,8 @@
   import { onDestroy, onMount, untrack } from 'svelte';
   import { RefreshCw, LogOut, CircleHelp } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button/index.js';
+  import { subscribeChanges, Changes, type LiveStatus } from '$lib/realtime';
+  import UsagePanel from './management/UsagePanel.svelte';
   import Overview from './Overview.svelte';
   import LogsPanel from './LogsPanel.svelte';
   import CredentialsPanel from './management/CredentialsPanel.svelte';
@@ -21,10 +23,11 @@
     initialDemo = false,
     onlogout = () => window.location.assign('/login')
   }: { initialDemo?: boolean; onlogout?: () => void } = $props();
-  type View = 'Overview' | 'Credentials' | 'API keys' | 'Logs' | 'Settings';
-  const views: View[] = ['Overview', 'Credentials', 'API keys', 'Logs', 'Settings'];
+  type View = 'Overview' | 'Usage' | 'Credentials' | 'API keys' | 'Logs' | 'Settings';
+  const views: View[] = ['Overview', 'Usage', 'Credentials', 'API keys', 'Logs', 'Settings'];
   const descriptions: Record<View, string> = {
     Overview: 'A clear view of your proxy instance.',
+    Usage: 'Remaining allowances and reset times across all your accounts.',
     Credentials: 'Manage the accounts that power your proxy.',
     'API keys': 'Control which clients can access your proxy.',
     Logs: 'Inspect recent activity from your server.',
@@ -42,6 +45,7 @@
   let view = $state<View>('Overview');
   let busy = $state(false);
   let notificationSaving = $state(false);
+  let liveStatus = $state<LiveStatus>('connecting');
   let signingOut = $state(false);
   let sessionExpired = $state(false);
   let errors = $state<Record<string, string>>({});
@@ -49,6 +53,8 @@
   let controller: AbortController | undefined;
   let refreshPromise: Promise<void> | undefined;
   let refreshQueued = false;
+  let refreshTopics = 0;
+  let stopUpdates = () => {};
   let destroyed = false;
   const message = (error: unknown) =>
     error instanceof Error ? error.message : 'Unable to complete this request. Please try again.';
@@ -56,13 +62,17 @@
   async function sessionFetch(input: RequestInfo | URL, init?: RequestInit) {
     const response = await fetch(input, init);
     if (response.status === 401) {
+      stopUpdates();
       clearData();
       sessionExpired = true;
     }
     return response;
   }
 
-  function refresh(): Promise<void> {
+  function refresh(
+    background = false,
+    topics: number = Changes.accounts | Changes.config
+  ): Promise<void> {
     if (!client || sessionExpired || destroyed) return Promise.resolve();
     if (demo) {
       updated = 'Demo data';
@@ -70,13 +80,16 @@
     }
     // A completed mutation needs a snapshot started after it, even if a read is in flight.
     refreshQueued = true;
+    refreshTopics |= topics;
     if (refreshPromise) return refreshPromise;
-    busy = true;
+    if (!background) busy = true;
     refreshPromise = (async () => {
       try {
         do {
           refreshQueued = false;
-          await refreshOnce();
+          const topics = refreshTopics;
+          refreshTopics = 0;
+          await refreshOnce(topics);
         } while (refreshQueued && !sessionExpired && !destroyed);
       } finally {
         busy = false;
@@ -86,7 +99,7 @@
     return refreshPromise;
   }
 
-  async function refreshOnce() {
+  async function refreshOnce(topics: number) {
     const activeClient = client;
     controller?.abort();
     const pending = new AbortController();
@@ -114,11 +127,14 @@
         }
       }
     ];
-    const results = await Promise.allSettled(jobs.map((job) => job.run()));
+    const selected = jobs.filter(
+      (job) => topics & (job.name === 'Credentials' ? Changes.accounts : Changes.config)
+    );
+    const results = await Promise.allSettled(selected.map((job) => job.run()));
     if (pending.signal.aborted || client !== activeClient) return;
     const nextErrors = { ...errors };
     results.forEach((result, index) => {
-      const job = jobs[index];
+      const job = selected[index];
       if (result.status === 'fulfilled') {
         job.apply(result.value);
         delete nextErrors[job.name];
@@ -146,6 +162,7 @@
         credentials: 'same-origin'
       });
       if (!response.ok) throw new Error('Unable to sign out. Please try again.');
+      stopUpdates();
       clearData();
       sessionExpired = true;
       onlogout();
@@ -157,6 +174,19 @@
   }
   onMount(() => {
     void refresh();
+    if (!demo)
+      stopUpdates = subscribeChanges(
+        (topics) => {
+          if (topics & (Changes.accounts | Changes.config)) void refresh(true, topics);
+        },
+        (status) => {
+          const changed = liveStatus !== status;
+          liveStatus = status;
+          // One read on disconnect detects a revoked session even if reconnect gets 401.
+          if (changed && status === 'reconnecting') void refresh(true);
+        }
+      );
+    return () => stopUpdates();
   });
   async function navigate(next: View) {
     // Keep the notification form mounted until its save response has been applied.
@@ -221,14 +251,23 @@
         <div class="heading-actions">
           <span
             class:offline={demo}
-            class:attention={!demo && Object.keys(errors).length > 0}
+            class:attention={!demo &&
+              (Object.keys(errors).length > 0 || liveStatus !== 'connected')}
             class="status"
             >{demo
               ? 'Demo mode'
               : Object.keys(errors).length
                 ? 'Needs attention'
-                : 'Connected'}</span
-          ><Button variant="outline" onclick={refresh} disabled={busy} aria-label="Refresh data"
+                : liveStatus === 'connected'
+                  ? 'Live'
+                  : liveStatus === 'reconnecting'
+                    ? 'Reconnecting live updates…'
+                    : 'Connecting live updates…'}</span
+          ><Button
+            variant="outline"
+            onclick={() => refresh()}
+            disabled={busy}
+            aria-label="Refresh data"
             ><RefreshCw size={14} class={busy ? 'animate-spin' : ''} />{busy
               ? 'Refreshing…'
               : 'Refresh'}</Button
@@ -246,6 +285,7 @@
         {:else if view === 'Overview'}
           {#if files.length === 0}<CodexDeviceAuth
               {client}
+              live={!demo}
               disabled={demo || busy}
               onconnected={refresh}
             />{/if}
@@ -255,8 +295,11 @@
             strategy={config.routing?.strategy}
             oncredentials={() => navigate('Credentials')}
           />
+          <UsagePanel {files} />
+        {:else if view === 'Usage'}
+          <UsagePanel {files} />
         {:else if view === 'Credentials'}
-          <CodexDeviceAuth {client} disabled={demo || busy} onconnected={refresh} />
+          <CodexDeviceAuth {client} live={!demo} disabled={demo || busy} onconnected={refresh} />
           <CredentialsPanel {client} data={files} onrefresh={refresh} disabled={demo || busy} />
         {:else if view === 'API keys'}<KeysPanel
             {client}

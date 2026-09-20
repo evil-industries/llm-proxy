@@ -6,7 +6,7 @@ import LoginPanel from '$lib/components/LoginPanel.svelte';
 import LoginPage from '../routes/login/+page.svelte';
 import { demoConfig, demoFiles, demoNotifications } from '$lib/demo';
 
-const sections = ['Overview', 'Credentials', 'API keys', 'Logs', 'Settings'] as const;
+const sections = ['Overview', 'Usage', 'Credentials', 'API keys', 'Logs', 'Settings'] as const;
 const longName = `production-${'credential'.repeat(24)}.json`;
 const longKey = `sk-${'long-key'.repeat(80)}`;
 const secret = 'management-test-secret-never-persist';
@@ -375,10 +375,10 @@ test('supports keyboard skip link and section navigation with visible focus', as
   const nav = page.getByRole('navigation', { name: 'Management sections' });
   await nav.getByRole('button', { name: 'Overview', exact: true }).click();
   await userEvent.tab();
-  await expect.element(nav.getByRole('button', { name: 'Credentials', exact: true })).toHaveFocus();
+  await expect.element(nav.getByRole('button', { name: 'Usage', exact: true })).toHaveFocus();
   expect(getComputedStyle(document.activeElement!).outlineStyle).not.toBe('none');
   await userEvent.keyboard('{Enter}');
-  await expect.element(page.getByRole('heading', { name: 'Credentials', level: 1 })).toBeVisible();
+  await expect.element(page.getByRole('heading', { name: 'Usage', level: 1 })).toBeVisible();
 });
 
 test('sign in and all management sections pass automated WCAG accessibility checks', async () => {

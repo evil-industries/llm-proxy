@@ -21,6 +21,11 @@ const upstream = createServer(async (request, response) => {
     authorization: request.headers.authorization,
     cookie: request.headers.cookie
   });
+  if (request.url === '/v0/management/events') {
+    response.setHeader('Content-Type', 'text/event-stream');
+    response.write('data: 1\n\n');
+    return;
+  }
   response.setHeader('Content-Type', 'application/json');
   response.end(JSON.stringify({ debug: false, routing: { strategy: 'round-robin' } }));
 });
@@ -96,6 +101,7 @@ try {
   assert.equal(response.headers.get('location'), '/login');
   assert.equal((await request('/login')).status, 200);
   assert.equal((await request('/api/management/config')).status, 401);
+  assert.equal((await request('/api/management/events')).status, 401);
   assert.equal((await request('/v0/management/config')).status, 404);
   assert.equal(requests.length, 0, 'Unauthenticated requests must never reach the upstream');
 
@@ -148,6 +154,19 @@ try {
   assert.equal(requests.length, 2);
   assert.ok(requests[1].bytes > file.length, 'The complete multipart upload must reach Go');
 
+  const live = await request('/api/management/events', { headers: { Cookie: cookie } });
+  assert.equal(live.status, 200);
+  assert.equal(live.headers.get('content-type'), 'text/event-stream');
+  const reader = live.body.getReader();
+  const first = await reader.read();
+  assert.equal(
+    new TextDecoder().decode(first.value),
+    'data: 1\n\n',
+    'Events must stream before upstream closes'
+  );
+  assert.equal(requests.at(-1).authorization, `Bearer ${key}`);
+  assert.equal(requests.at(-1).cookie, undefined);
+
   assert.equal(
     (
       await request('/api/session', {
@@ -161,8 +180,15 @@ try {
     (await request('/api/management/config', { headers: { Cookie: cookie } })).status,
     401
   );
+  let ending = '';
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    ending += new TextDecoder().decode(chunk.value);
+  }
+  assert.match(ending, /event: session-ended/, 'Logout must close an existing event stream');
   console.log(
-    'Built server smoke test passed: auth gate, secure cookie, relay, uncapped upload, CSRF, and logout revocation.'
+    'Built server smoke test passed: auth gate, secure cookie, relay, uncapped upload, CSRF, live events, and stream revocation on logout.'
   );
 } finally {
   server.kill('SIGTERM');

@@ -396,6 +396,7 @@ func (s *Server) Stop(ctx context.Context) error {
 	log.Debug("Stopping API server...")
 	if s.mgmt != nil {
 		// Cancel acquisition promptly; drain background commits below with ctx.
+		s.mgmt.CloseEventStreams()
 		s.mgmt.CancelDeviceAuthFlows()
 	}
 	errNotifications := s.stopNotifications(ctx)
