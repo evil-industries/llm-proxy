@@ -2,6 +2,8 @@
 
 English | [中文](README_CN.md) | [日本語](README_JA.md)
 
+**Start here:** [Deployment](docs/deployment.md) · [API usage](docs/api-usage.md) · [Management console](frontend/README.md) · [Configuration reference](config.example.yaml)
+
 If you want to use CLIProxyAPI on your desktop, we recommend our [EasyCLIProxyAPI](https://github.com/router-for-me/EasyCLIProxyAPI) desktop client. It provides a graphical configuration UI, automatic updates, system tray integration, and one-click start/stop for the CLIProxyAPI service.
 
 CLIProxyAPI is a proxy server that provides OpenAI/Gemini/Claude/Codex/Grok compatible API interfaces for CLI.
@@ -124,7 +126,11 @@ PackyCode provides special discounts for our software users: register using <a h
 
 ## Getting Started
 
-CLIProxyAPI Guides: [https://help.router-for.me/](https://help.router-for.me/)
+1. [Deploy the gateway](docs/deployment.md) with Docker Compose and the management console, or run the Go server on its own.
+2. Connect a provider account or configure an upstream API key. Client API keys authenticate callers to this gateway; provider credentials give the gateway access to models.
+3. [List models and send your first request](docs/api-usage.md) using your gateway URL and client API key.
+
+Additional upstream guides: [help.router-for.me](https://help.router-for.me/).
 
 ## Management API
 
