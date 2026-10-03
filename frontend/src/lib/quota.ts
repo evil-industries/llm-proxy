@@ -6,10 +6,12 @@ export interface QuotaWindow {
   remaining: number;
   observed: number;
   reset?: number;
+  minutes?: number;
 }
 export interface AccountQuota {
   windows: QuotaWindow[];
   credits?: string;
+  plan?: string;
   resetCredits?: number;
   observed?: number;
 }
@@ -60,6 +62,7 @@ export function accountQuota(file: AuthFile): AccountQuota {
     }
     if (provider === 'codex' && (result.observed === undefined || observed > result.observed)) {
       result.observed = observed;
+      result.plan = signals['x-codex-plan-type'] || undefined;
       const balance = numeric(signals['x-codex-credits-balance']);
       result.credits =
         signals['x-codex-credits-unlimited'] === 'true'
@@ -106,7 +109,14 @@ export function accountQuota(file: AuthFile): AccountQuota {
         key = poolName ? `${poolName.toLowerCase()}:${period}` : window;
         label = `${poolName ? `${title(poolName)} · ` : ''}${periodLabel(period, numeric(signals[`${prefix}-window-minutes`]))}`;
       }
-      const item = { key, label, remaining: 100 * (1 - used / scale), observed, reset };
+      const item = {
+        key,
+        label,
+        minutes: numeric(signals[`${prefix}-window-minutes`]),
+        remaining: 100 * (1 - used / scale),
+        observed,
+        reset
+      };
       const previous = latest.get(key);
       if (
         !previous ||
@@ -131,11 +141,18 @@ export function quotaStale(window: QuotaWindow, now: number): boolean {
 export function resetLabel(reset: number | undefined): string {
   return reset === undefined
     ? 'Reset time unavailable'
-    : new Date(reset).toLocaleString(undefined, {
-        month: 'short',
-        day: 'numeric',
+    : new Date(reset).toLocaleString('de-DE', {
+        hourCycle: 'h23',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
         hour: '2-digit',
-        minute: '2-digit',
-        timeZoneName: 'short'
+        minute: '2-digit'
       });
+}
+
+/** Display severity only; notification thresholds and routing are configured separately. */
+export function quotaTone(remaining: number | undefined, stale = false) {
+  if (remaining === undefined || stale) return 'neutral';
+  return remaining <= 10 ? 'destructive' : remaining <= 25 ? 'warning' : 'constructive';
 }

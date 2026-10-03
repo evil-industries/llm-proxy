@@ -170,7 +170,11 @@ export function validManagementResponse(path: string, value: unknown): boolean {
         count(value['line-count']) &&
         count(value['latest-timestamp']) &&
         string(value['next-cursor']) &&
-        fields(value, ['cursor-reset'], boolean)
+        fields(value, ['cursor-reset'], boolean) &&
+        (value.timestamps === undefined ||
+          (Array.isArray(value.timestamps) &&
+            value.timestamps.every(count) &&
+            value.timestamps.length === (value.lines as string[]).length))
       );
     case '/routing/strategy':
       return object(value) && string(value.strategy);

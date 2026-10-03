@@ -34,6 +34,10 @@ test('runtime credentials can be disabled and re-enabled without offering file d
     .getByRole('navigation')
     .getByRole('button', { name: 'Credentials', exact: true })
     .click();
+  await expect
+    .element(page.getByRole('combobox', { name: 'Filter by provider' }))
+    .toHaveValue('codex');
+  await page.getByRole('combobox', { name: 'Filter by provider' }).selectOptions('all');
   await expect.element(page.getByText('Runtime credential · No saved file')).toBeVisible();
   await expect
     .element(page.getByRole('button', { name: `Delete ${runtime.name}` }))

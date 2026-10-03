@@ -142,13 +142,13 @@
           gateway.</Card.Description
         >
       </div>
-      {#if complete}<Badge variant="trust"><Check aria-hidden="true" />Connected</Badge
-        >{:else if pending}<Badge variant="trust">Awaiting approval</Badge>{/if}
+      {#if complete}<Badge variant="constructive"><Check aria-hidden="true" />Connected</Badge
+        >{:else if pending}<Badge variant="warning">Awaiting approval</Badge>{/if}
     </div>
   </Card.Header>
   <Card.Content class="device-content">
     {#if notice}
-      <Alert.Root role="alert"
+      <Alert.Root variant="destructive" role="alert"
         ><Alert.Title>Connection status unavailable</Alert.Title><Alert.Description
           >{notice}</Alert.Description
         ></Alert.Root
@@ -173,7 +173,7 @@
             </p>{/if}
         </div>
       </div>
-      {#if refreshFailed}<Alert.Root role="alert"
+      {#if refreshFailed}<Alert.Root variant="warning" role="alert"
           ><Alert.Description
             >The account is connected, but the credential list could not refresh.</Alert.Description
           ></Alert.Root
@@ -235,13 +235,13 @@
         </li>
       </ol>
     {:else if flow.status === 'expired'}
-      <Alert.Root role="status"
+      <Alert.Root variant="warning" role="status"
         ><Alert.Title>The approval code expired</Alert.Title><Alert.Description
           >No new account was connected. Start again to get a fresh code.</Alert.Description
         ></Alert.Root
       >
     {:else if flow.status === 'error'}
-      <Alert.Root role="alert"
+      <Alert.Root variant="destructive" role="alert"
         ><Alert.Title>The account could not connect</Alert.Title><Alert.Description
           >{flow.error || 'Start again to request a new approval code.'}</Alert.Description
         ></Alert.Root
@@ -308,15 +308,6 @@
     border: 1px solid var(--border);
     border-radius: 9px;
     box-shadow: none;
-  }
-  :global(.device-auth [data-slot='alert']) {
-    border: 0;
-    border-left: 3px solid var(--warning);
-    border-radius: 0;
-    background: transparent;
-  }
-  :global(.device-auth [data-slot='alert'][role='alert']) {
-    border-left-color: var(--destructive);
   }
   :global(.device-auth [data-slot='card-footer']) {
     background: transparent;
@@ -417,7 +408,7 @@
   .device-success > :global(svg) {
     flex-shrink: 0;
     margin-top: 0.2rem;
-    color: var(--trust);
+    color: var(--constructive);
   }
   .device-success > div {
     min-width: 0;

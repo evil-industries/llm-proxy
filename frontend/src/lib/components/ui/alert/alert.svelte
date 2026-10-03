@@ -6,8 +6,13 @@
     variants: {
       variant: {
         default: 'bg-card text-card-foreground',
+        constructive:
+          'border-constructive-border bg-constructive-subtle text-constructive *:data-[slot=alert-description]:text-constructive',
         destructive:
-          'text-destructive bg-card *:data-[slot=alert-description]:text-destructive/90 *:[svg]:text-current'
+          'border-destructive-border bg-destructive-subtle text-destructive *:data-[slot=alert-description]:text-destructive',
+        warning:
+          'border-warning-border bg-warning-subtle text-warning *:data-[slot=alert-description]:text-warning',
+        info: 'border-info-border bg-info-subtle text-info *:data-[slot=alert-description]:text-info'
       }
     },
     defaultVariants: {

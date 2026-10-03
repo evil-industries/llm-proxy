@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { formatDateTime } from '$lib/datetime';
   import { onMount, untrack } from 'svelte';
   import { Bell, Save, Send, RefreshCw } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button/index.js';
@@ -143,10 +144,9 @@
   <div class="panel-header">
     <div class="section-heading">
       <h2 id="notifications-title"><Bell size={16} /> Quota notifications</h2>
-      <p class="muted">Send quota alerts and reset notifications to your ntfy server.</p>
     </div>
     {#if saved}<Button
-        variant="outline"
+        variant="ghost"
         aria-label="Refresh notification status"
         disabled={locked || dirty}
         onclick={() => load()}><RefreshCw size={14} />Refresh status</Button
@@ -303,13 +303,13 @@
             : 'Automatic quota alerts disabled.'}
       </p>
       {#if saved.status.last_success_at}<p class="muted">
-          Last delivered: {new Date(saved.status.last_success_at).toLocaleString()}
+          Last delivered: {formatDateTime(saved.status.last_success_at)}
         </p>{/if}
       {#if saved.status.last_error}<p role="status">
           Last delivery failed: {saved.status.last_error}
         </p>{/if}
       {#if saved.status.next_retry_at}<p class="muted">
-          Next retry: {new Date(saved.status.next_retry_at).toLocaleString()}
+          Next retry: {formatDateTime(saved.status.next_retry_at)}
         </p>{/if}
     </div>
   {/if}
@@ -325,7 +325,7 @@
   .notification-fields,
   .notification-actions,
   .delivery-status {
-    padding: 24px;
+    padding: 24px 0;
   }
   .notification-enable {
     display: flex;
@@ -333,6 +333,10 @@
     justify-content: space-between;
     gap: 20px;
     border-bottom: 1px solid var(--border);
+  }
+  /* Keep the switch's extended pointer target inside the section. */
+  .notification-enable :global([data-slot='switch']) {
+    margin-inline-end: 12px;
   }
   .notification-enable p {
     margin-top: 6px;
@@ -390,7 +394,7 @@
     .notification-fields,
     .notification-actions,
     .delivery-status {
-      padding: 18px 16px;
+      padding: 18px 0;
     }
     .notification-actions {
       padding-top: 0;

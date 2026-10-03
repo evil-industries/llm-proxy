@@ -1,11 +1,12 @@
 <script lang="ts">
+  import { formatTime } from '$lib/datetime';
   import { BarChart } from 'layerchart';
   import { ChartNoAxesCombined } from '@lucide/svelte';
   import * as Chart from '$lib/components/ui/chart/index.js';
   import { aggregateRequestBuckets } from '$lib/chart';
   import type { AuthFile } from '$lib/api';
 
-  let { files = [] }: { files?: AuthFile[] } = $props();
+  let { files = [], title = 'Request activity' }: { files?: AuthFile[]; title?: string } = $props();
   const uid = $props.id();
   const config = {
     success: { label: 'Successful', color: 'var(--constructive)' },
@@ -15,7 +16,15 @@
     { key: 'success', label: config.success.label, color: 'var(--color-success)' },
     { key: 'failed', label: config.failed.label, color: 'var(--color-failed)' }
   ];
-  let buckets = $derived(aggregateRequestBuckets(files));
+  let buckets = $derived(
+    aggregateRequestBuckets(files).map((bucket) => ({
+      ...bucket,
+      time:
+        bucket.timestamp === undefined
+          ? '—'
+          : `${formatTime(bucket.timestamp * 1000)}–${formatTime((bucket.timestamp + 600) * 1000)}`
+    }))
+  );
   let successful = $derived(buckets.reduce((sum, bucket) => sum + bucket.success, 0));
   let failed = $derived(buckets.reduce((sum, bucket) => sum + bucket.failed, 0));
   const number = (value: number) => new Intl.NumberFormat('en-US').format(value);
@@ -29,8 +38,8 @@
 <section class="panel request-chart" aria-labelledby={`request-chart-title-${uid}`}>
   <div class="panel-header">
     <div class="section-heading">
-      <h2 id={`request-chart-title-${uid}`}>Request activity</h2>
-      <p class="muted">Recent 10-minute intervals · server local time</p>
+      <h2 id={`request-chart-title-${uid}`}>{title}</h2>
+      <p class="muted">Recent 10-minute intervals</p>
     </div>
     {#if buckets.length}<div
         class="chart-legend"
@@ -136,7 +145,7 @@
     min-width: 0;
   }
   .chart-data {
-    padding: 16px 24px;
+    padding: 16px 0;
     border-top: 1px solid var(--border);
     font-size: 12px;
   }
@@ -169,7 +178,7 @@
       padding: 8px 8px 8px calc(4em + 8px);
     }
     .chart-data {
-      padding: 16px;
+      padding: 16px 0;
     }
   }
 </style>

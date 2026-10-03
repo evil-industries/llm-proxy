@@ -8,9 +8,13 @@
     variants: {
       variant: {
         default: 'bg-primary text-primary-foreground hover:bg-primary/80',
-        trust: 'bg-trust text-trust-foreground hover:bg-trust/90 focus-visible:ring-trust/30',
+        trust:
+          'bg-info-accent text-info-accent-foreground hover:bg-info-accent/80 focus-visible:ring-info/30',
+        info: 'bg-info-accent text-info-accent-foreground hover:bg-info-accent/80 focus-visible:ring-info/30',
+        warning:
+          'bg-warning-accent text-warning-accent-foreground hover:bg-warning-accent/80 focus-visible:ring-warning/30',
         constructive:
-          'bg-constructive text-constructive-foreground hover:bg-constructive/90 focus-visible:ring-constructive/30',
+          'bg-constructive-accent text-constructive-accent-foreground hover:bg-constructive-accent/80 focus-visible:ring-constructive/30',
         outline:
           'border-border bg-background hover:bg-muted hover:text-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50 aria-expanded:bg-muted aria-expanded:text-foreground',
         secondary:
@@ -18,7 +22,7 @@
         ghost:
           'hover:bg-muted hover:text-foreground dark:hover:bg-muted/50 aria-expanded:bg-muted aria-expanded:text-foreground',
         destructive:
-          'bg-destructive/10 hover:bg-destructive/20 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/20 text-destructive focus-visible:border-destructive/40 dark:hover:bg-destructive/30',
+          'border-destructive-border bg-destructive-subtle text-destructive hover:bg-destructive-border focus-visible:ring-destructive/30',
         link: 'text-primary underline-offset-4 hover:underline'
       },
       size: {

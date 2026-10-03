@@ -491,6 +491,7 @@ func getAvailableAuths(auths []*Auth, provider, model string, now time.Time) ([]
 }
 
 type prevalidatedAuthCandidatesKey struct{}
+type preferredFallbackAuthsKey struct{}
 
 func getSelectorAvailableAuths(ctx context.Context, auths []*Auth, provider, model string, now time.Time) ([]*Auth, error) {
 	return getSelectorAvailableAuthsWithPriorityMode(ctx, auths, provider, model, now, false)
@@ -508,6 +509,16 @@ func getSelectorAvailableAuthsWithPriorityMode(ctx context.Context, auths []*Aut
 			// unrelated cooldowns. Affinity bindings may span all priority tiers, but
 			// fallback selection must still use the highest available tier.
 			if !allPriorities {
+				preferred, _ := ctx.Value(preferredFallbackAuthsKey{}).(map[string]bool)
+				var candidates []*Auth
+				for _, auth := range highestPriorityAuths(auths) {
+					if preferred[auth.ID] {
+						candidates = append(candidates, auth)
+					}
+				}
+				if len(candidates) > 0 {
+					return candidates, nil
+				}
 				return highestPriorityAuths(auths), nil
 			}
 			return auths, nil
@@ -910,6 +921,8 @@ func availabilityBlock(unavailable, quotaExceeded bool, nextRetryAfter, nextReco
 // It extracts session ID from multiple sources and maintains session-to-auth
 // mappings with automatic failover when the bound auth becomes unavailable.
 type SessionAffinitySelector struct {
+	// Serialize lookup and binding so simultaneous first requests cannot split a thread.
+	pickMu           sync.Mutex
 	fallback         Selector
 	cache            *SessionCache
 	matcher          *cliproxysession.MerklePrefixMatcher
@@ -971,6 +984,8 @@ func (s *SessionAffinitySelector) Trees() *cliproxysession.InMemorySessionTreeSt
 // a session uses multiple models (e.g., gemini-2.5-pro and gemini-3-flash-preview)
 // that may be supported by different auth credentials, and to avoid cross-provider conflicts.
 func (s *SessionAffinitySelector) Pick(ctx context.Context, provider, model string, opts cliproxyexecutor.Options, auths []*Auth) (*Auth, error) {
+	s.pickMu.Lock()
+	defer s.pickMu.Unlock()
 	entry := selectorLogEntry(ctx)
 	if opts.Metadata == nil {
 		opts.Metadata = make(map[string]any)

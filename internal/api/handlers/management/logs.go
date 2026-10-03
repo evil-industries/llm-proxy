@@ -566,7 +566,14 @@ func writeLogsResponse(c *gin.Context, lines []string, lineCount int, latest int
 	if lines == nil {
 		lines = []string{}
 	}
+	// Resolve legacy zone-less log times on the server, where their timezone is known.
+	// Keep the raw lines intact for inspection and export.
+	timestamps := make([]int64, len(lines))
+	for i, line := range lines {
+		timestamps[i] = parseTimestamp(line)
+	}
 	payload := gin.H{
+		"timestamps":       timestamps,
 		"lines":            lines,
 		"line-count":       lineCount,
 		"latest-timestamp": latest,
@@ -1251,6 +1258,12 @@ func parseTimestamp(line string) int64 {
 	}
 	if len(line) < 19 {
 		return 0
+	}
+	// New logs carry an offset; older logs retain their server-local interpretation.
+	if end := strings.IndexByte(line, ']'); end > 19 {
+		if timestamp, err := time.Parse("2006-01-02 15:04:05Z07:00", line[:end]); err == nil {
+			return timestamp.Unix()
+		}
 	}
 	candidate := line[:19]
 	t, err := time.ParseInLocation("2006-01-02 15:04:05", candidate, time.Local)

@@ -317,6 +317,11 @@ func isKnownDefaultValue(path []string, node *yaml.Node) bool {
 		return false
 	}
 
+	// An explicit affinity opt-out must survive saving because omission enables it.
+	if strings.Join(path, ".") == "routing.session-affinity" {
+		return false
+	}
+
 	// First check if it's a zero value
 	if isZeroValueNode(node) {
 		return true

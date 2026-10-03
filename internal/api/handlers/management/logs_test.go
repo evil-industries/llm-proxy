@@ -734,3 +734,44 @@ func appendMainLog(t *testing.T, dir, content string) {
 		t.Fatalf("close main log: %v", errClose)
 	}
 }
+
+func TestParseTimestampWithOffset(t *testing.T) {
+	want := time.Date(2026, 10, 3, 15, 30, 0, 0, time.UTC).Unix()
+	for _, line := range []string{
+		"[2026-10-03 17:30:00+02:00] [req] [info ] routed",
+		"[2026-10-03 15:30:00Z] [req] [info ] routed",
+	} {
+		if got := parseTimestamp(line); got != want {
+			t.Fatalf("parseTimestamp(%q) = %d, want %d", line, got, want)
+		}
+	}
+}
+
+func TestLogsResponseIncludesInstantsWithoutChangingRawLines(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	lines := []string{
+		"[2026-10-03 17:30:00] [info] legacy",
+		"[2026-10-03 17:30:00+02:00] [info] zoned",
+		"continuation without a timestamp",
+	}
+	writeLogsResponse(ctx, lines, len(lines), 0, "cursor", false)
+	var response struct {
+		Lines      []string `json:"lines"`
+		Timestamps []int64  `json:"timestamps"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(response.Lines, lines) {
+		t.Fatal("raw log lines changed")
+	}
+	want := []int64{
+		time.Date(2026, 10, 3, 17, 30, 0, 0, time.Local).Unix(),
+		time.Date(2026, 10, 3, 15, 30, 0, 0, time.UTC).Unix(),
+		0,
+	}
+	if !reflect.DeepEqual(response.Timestamps, want) {
+		t.Fatalf("timestamps = %v, want %v", response.Timestamps, want)
+	}
+}

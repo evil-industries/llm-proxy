@@ -27,3 +27,34 @@ describe('log inspection helpers', () => {
     expect(fileSize(1048576)).toBe('1.0 MiB');
   });
 });
+
+it('filters exact thread IDs and correlates earlier request lines without mixing ambiguous requests', () => {
+  const entries = [
+    '[2026-10-03 12:00:00Z] [req1] [info ] incoming',
+    '[2026-10-03 12:00:00Z] [req1] [info ] routed thread_id="thread-a" account_id="account-1"',
+    '[2026-10-03 12:00:00Z] [req2] [info ] routed thread_id="thread-ab"',
+    '[2026-10-03 12:00:00Z] [--------] [info ] unrelated'
+  ].map((text, id) => ({ id, text, level: 'info' as const }));
+  expect(filterLogs(entries, '', 'all', 'thread-a').map((entry) => entry.id)).toEqual([0, 1]);
+  expect(filterLogs(entries, '', 'all', 'thread')).toEqual([]);
+  expect(filterLogs(entries, 'incoming', 'all', 'thread-a').map((entry) => entry.id)).toEqual([0]);
+  entries.push({
+    id: 4,
+    text: '[2026-10-03 12:00:00Z] [req1] [info ] thread_id="other"',
+    level: 'info'
+  });
+  expect(filterLogs(entries, '', 'all', 'thread-a').map((entry) => entry.id)).toEqual([1]);
+});
+
+it('searches displayed German dates while retaining raw lines for export', () => {
+  const entries = [
+    {
+      id: 0,
+      text: '[2026-10-03 17:30:00] [info] ready',
+      timestamp: new Date(2026, 9, 3, 17, 30).getTime(),
+      level: 'info' as const
+    }
+  ];
+  expect(filterLogs(entries, '03.10.2026', 'all')).toEqual(entries);
+  expect(filterLogs(entries, '2026-10-03', 'all')).toEqual(entries);
+});

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { formatDateTime, formatTime } from '$lib/datetime';
+  import { correlateLogs, logPresentation } from '$lib/logs';
   import { onMount, untrack } from 'svelte';
   import { subscribeChanges, Changes } from '$lib/realtime';
   import {
@@ -9,12 +11,18 @@
     RefreshCw,
     Search,
     ScrollText,
-    FileText
+    FileText,
+    ChevronRight,
+    ChevronLeft,
+    Ellipsis,
+    RotateCcw
   } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button/index.js';
   import { Input } from '$lib/components/ui/input/index.js';
   import { Badge } from '$lib/components/ui/badge/index.js';
   import { Switch } from '$lib/components/ui/switch/index.js';
+  import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
+  import * as Table from '$lib/components/ui/table/index.js';
   import * as Dialog from '$lib/components/ui/dialog/index.js';
   import * as Tabs from '$lib/components/ui/tabs/index.js';
   import * as Select from '$lib/components/ui/select/index.js';
@@ -53,6 +61,15 @@
   let lastUpdated = $state('');
   let query = $state('');
   let severity = $state('all');
+  let thread = $state('');
+  let detailThread = $state('');
+  const contexts = $derived(correlateLogs(entries));
+  const threads = $derived([
+    ...new Set(
+      [...contexts.values()].flatMap((context) => (context.thread ? [context.thread] : []))
+    )
+  ]);
+  const threadListID = $props.id();
   let wrap = $state(true);
   let page = $state(0);
   let sequence = 0;
@@ -61,7 +78,7 @@
   let queued = false;
   let filesQueued = false;
   const loggingDisabled = $derived(config['logging-to-file'] === false);
-  const filtered = $derived(filterLogs(entries, query, severity));
+  const filtered = $derived(filterLogs(entries, query, severity, thread, contexts));
   const pageCount = $derived(Math.max(1, Math.ceil(filtered.length / LOG_PAGE_SIZE)));
   const currentPage = $derived(Math.min(page, pageCount - 1));
   const visible = $derived(
@@ -116,10 +133,11 @@
           );
         // Follow the end only if the operator is still there when this read completes.
         const wasLastPage = currentPage === pageCount - 1;
-        const additions = data.lines.map((text) => ({
+        const additions: LogEntry[] = data.lines.map((text, index) => ({
           id: sequence++,
           text,
-          level: logLevel(text)
+          level: logLevel(text),
+          timestamp: data.timestamps?.[index] ? data.timestamps[index] * 1000 : undefined
         }));
         if (latest || !loaded) {
           entries = additions;
@@ -140,13 +158,15 @@
           if (wasLastPage)
             page = Math.max(
               0,
-              Math.ceil(filterLogs(entries, query, severity).length / LOG_PAGE_SIZE) - 1
+              Math.ceil(
+                filterLogs(entries, query, severity, thread, contexts).length / LOG_PAGE_SIZE
+              ) - 1
             );
         }
         cursor = data['next-cursor'];
         loaded = true;
         catchingUp = more;
-        if (!more) lastUpdated = new Date().toLocaleTimeString();
+        if (!more) lastUpdated = formatTime();
         if (!more) break;
         // Yield between serialized batches so pause, navigation and rendering stay responsive.
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -257,6 +277,7 @@
     previewController?.abort();
     detailFile = '';
     detailTitle = 'Log line details';
+    detailThread = contexts.get(entry.id)?.thread ?? '';
     detailNotice = '';
     detailText = entry.text;
     detailError = '';
@@ -342,20 +363,55 @@
 </script>
 
 <section class="panel logs-panel" aria-label="Log inspection">
-  <div class="panel-header">
-    <div class="section-heading">
-      <h2>Logs</h2>
-      <p class="muted">Inspect application activity and saved request details.</p>
+  <Tabs.Root bind:value={tab} class="flex-col min-w-0 min-h-0 flex-1">
+    <div class="logs-topbar">
+      <Tabs.List variant="line" class="log-tabs max-w-full"
+        ><Tabs.Trigger value="server">Server logs</Tabs.Trigger><Tabs.Trigger value="requests"
+          >Request logs</Tabs.Trigger
+        ></Tabs.List
+      >
+      {#if tab === 'server'}
+        <div class="log-controls">
+          <Button
+            variant="ghost"
+            disabled={disabled || loggingDisabled}
+            onclick={togglePaused}
+            aria-label={paused ? 'Resume live' : 'Pause live'}
+            >{#if paused}<Play size={14} />{:else}<Pause size={14} />{/if}<span
+              class="control-label">{paused ? 'Resume live' : 'Pause live'}</span
+            ></Button
+          >
+          <Button
+            variant="ghost"
+            disabled={disabled || busy || loggingDisabled}
+            aria-label="Refresh logs"
+            onclick={() => load()}
+            ><RefreshCw size={14} /><span class="control-label">Refresh logs</span></Button
+          >
+          <Button
+            variant="ghost"
+            disabled={disabled || busy || loggingDisabled}
+            aria-label="Load latest (replace history)"
+            title="Load latest (replace history)"
+            onclick={() => load(true)}
+            ><RotateCcw size={14} /><span class="control-label">Load latest</span></Button
+          >
+          <Badge variant="outline" title={lastUpdated ? `Last updated ${lastUpdated}` : undefined}
+            >{loggingDisabled
+              ? 'Logging disabled'
+              : paused
+                ? 'Paused'
+                : catchingUp
+                  ? 'Catching up…'
+                  : busy
+                    ? 'Loading'
+                    : 'Live updates'}</Badge
+          >
+        </div>
+      {/if}
     </div>
-  </div>
-  <Tabs.Root bind:value={tab} class="flex-col min-w-0">
-    <Tabs.List class="log-tabs mx-6 mb-4 max-w-full"
-      ><Tabs.Trigger value="server">Server logs</Tabs.Trigger><Tabs.Trigger value="requests"
-        >Request logs</Tabs.Trigger
-      ></Tabs.List
-    >
-    <Tabs.Content value="server" class="min-w-0">
-      <div class="toolbar">
+    <Tabs.Content value="server" class="min-w-0 min-h-0 flex flex-col">
+      <div class="toolbar log-filters">
         <div class="search">
           <Search size={16} /><Input
             aria-label="Search logs"
@@ -364,8 +420,19 @@
             oninput={() => (page = 0)}
           />
         </div>
+        <div class="thread-filter">
+          <Input
+            aria-label="Filter by thread"
+            placeholder="Thread ID…"
+            list={threadListID}
+            bind:value={thread}
+            oninput={() => (page = 0)}
+          />
+          <datalist id={threadListID}
+            >{#each threads as id}<option value={id}></option>{/each}</datalist
+          >
+        </div>
         <div class="severity">
-          <span>Severity</span>
           <Select.Root
             type="single"
             bind:value={severity}
@@ -379,51 +446,30 @@
               ><Select.Value placeholder="All levels" /></Select.Trigger
             >
             <Select.Content
-              ><Select.Item value="all" label="All levels">All levels</Select.Item
-              >{#each LOG_LEVELS as level}<Select.Item value={level} label={level}
-                  >{level}</Select.Item
-                >{/each}</Select.Content
+              ><Select.Group
+                ><Select.Item value="all" label="All levels">All levels</Select.Item
+                >{#each LOG_LEVELS as level}<Select.Item value={level} label={level}
+                    >{level}</Select.Item
+                  >{/each}</Select.Group
+              ></Select.Content
             >
           </Select.Root>
         </div>
-        <Button
-          variant="ghost"
-          disabled={!query && severity === 'all'}
-          onclick={() => {
-            query = '';
-            severity = 'all';
-            page = 0;
-          }}>Clear filters</Button
-        >
-        <label class="wrap-control"
-          ><Switch aria-label="Wrap log lines" bind:checked={wrap} />Wrap lines</label
-        >
-      </div>
-      <div class="toolbar compact">
-        <Button variant="outline" disabled={disabled || loggingDisabled} onclick={togglePaused}
-          >{#if paused}<Play size={14} />Resume live{:else}<Pause size={14} />Pause live{/if}</Button
-        >
-        <Button
-          variant="outline"
-          disabled={disabled || busy || loggingDisabled}
-          onclick={() => load()}><RefreshCw size={14} />Refresh logs</Button
-        >
-        <Button
-          variant="ghost"
-          disabled={disabled || busy || loggingDisabled}
-          onclick={() => load(true)}>Load latest (replace history)</Button
-        >
-        <Badge variant="outline"
-          >{loggingDisabled
-            ? 'Logging disabled'
-            : paused
-              ? 'Paused'
-              : catchingUp
-                ? 'Catching up…'
-                : busy
-                  ? 'Loading'
-                  : 'Live updates'}</Badge
-        >
+        <div class="filter-options">
+          <Button
+            variant="ghost"
+            disabled={!query && !thread && severity === 'all'}
+            onclick={() => {
+              query = '';
+              thread = '';
+              severity = 'all';
+              page = 0;
+            }}>Clear filters</Button
+          >
+          <label class="wrap-control"
+            ><Switch aria-label="Wrap log lines" bind:checked={wrap} />Wrap lines</label
+          >
+        </div>
       </div>
       {#if error}<div class="error-banner log-message" role="alert">
           {error}{loaded ? ' Loaded lines are retained; live updates are paused.' : ''}
@@ -440,65 +486,125 @@
       {:else if !loaded && busy}<p role="status" class="empty-state">Loading server logs…</p>
       {:else if !filtered.length}<div class="empty-state">
           <ScrollText size={26} />
-          <h3>{query || severity !== 'all' ? 'No matching log lines' : 'No logs available'}</h3>
+          <h3>
+            {query || thread || severity !== 'all' ? 'No matching log lines' : 'No logs available'}
+          </h3>
           <p>
-            {query || severity !== 'all'
+            {query || thread || severity !== 'all'
               ? 'Try another search or clear the filters.'
               : 'New application activity will appear when the server writes it.'}
           </p>
         </div>
       {:else}
-        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-        <div
-          class="log-lines"
-          class:nowrap={!wrap}
-          tabindex="0"
-          role="region"
-          aria-label="Log output"
-          aria-busy={busy}
+        <Table.Root
+          class={wrap ? 'min-w-[760px] table-fixed' : 'min-w-[760px] table-auto'}
+          aria-label="Server logs"
+          containerProps={{
+            class: 'log-lines min-h-0 flex-1 overflow-auto',
+            role: 'region',
+            'aria-label': 'Log output',
+            tabindex: 0,
+            'aria-busy': busy
+          }}
         >
-          {#each visible as entry (entry.id)}
-            <button
-              class="log-row"
-              class:reset={entry.reset}
-              onclick={() => inspect(entry)}
-              aria-label={`Inspect log line ${entry.id + 1}`}
-              ><span class="line-number" aria-hidden="true">{entry.id + 1}</span><span
-                class="level"
-                data-level={entry.level}>{entry.level}</span
-              ><span class="line-text">{entry.text}</span></button
-            >
-          {/each}
+          <Table.Header sticky>
+            <Table.Row>
+              <Table.Head class="w-44">Time</Table.Head>
+              <Table.Head class="w-20">Level</Table.Head>
+              <Table.Head>Message</Table.Head>
+              <Table.Head class="w-44">Thread / account</Table.Head>
+              <Table.Head class="w-12"><span class="sr-only">Details</span></Table.Head>
+            </Table.Row>
+          </Table.Header>
+          <Table.Body>
+            {#each visible as entry (entry.id)}
+              {@const presentation = logPresentation(entry.text, entry.timestamp)}
+              {@const context = contexts.get(entry.id)}
+              <Table.Row class="log-row" data-state={entry.reset ? 'selected' : undefined}>
+                <Table.Cell class="align-top"
+                  ><span class="log-time">{presentation.timestamp}</span></Table.Cell
+                >
+                <Table.Cell class="align-top"
+                  ><span class="level" data-level={entry.level}>{entry.level}</span></Table.Cell
+                >
+                <Table.Cell class="align-top">
+                  <div class="line-text" class:nowrap={!wrap}>{presentation.message}</div>
+                  {#if context?.request}<div class="log-context">
+                      Request {context.request}
+                    </div>{/if}
+                </Table.Cell>
+                <Table.Cell class="align-top">
+                  <div class="thread-context">
+                    <span>{context?.thread ?? '—'}</span>
+                    {#if context?.account}<span class="muted">{context.account}</span>{/if}
+                  </div>
+                </Table.Cell>
+                <Table.Cell class="align-top">
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onclick={() => inspect(entry)}
+                    aria-label={`Inspect log line ${entry.id + 1}`}><ChevronRight /></Button
+                  >
+                </Table.Cell>
+              </Table.Row>
+            {/each}
+          </Table.Body>
+        </Table.Root>
+      {/if}
+      {#if entries.length}
+        <div class="log-footer">
+          <span class="muted"
+            >{filtered.length === entries.length
+              ? `${entries.length.toLocaleString('de-DE')} ${entries.length === 1 ? 'line' : 'lines'}`
+              : `${filtered.length.toLocaleString('de-DE')} of ${entries.length.toLocaleString('de-DE')} lines`}</span
+          >
+          <div class="footer-actions">
+            {#if pageCount > 1}
+              <span class="muted">Page {currentPage + 1} of {pageCount}</span>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                disabled={currentPage === 0}
+                onclick={() => (page = currentPage - 1)}
+                aria-label="Previous lines"><ChevronLeft /></Button
+              >
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                disabled={currentPage >= pageCount - 1}
+                onclick={() => (page = currentPage + 1)}
+                aria-label="Next lines"><ChevronRight /></Button
+              >
+            {/if}
+            {#if visible.length}
+              <DropdownMenu.Root>
+                <DropdownMenu.Trigger>
+                  {#snippet child({ props })}<Button
+                      {...props}
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Log actions"><Ellipsis /></Button
+                    >{/snippet}
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Content align="end" side="top" class="w-44">
+                  <DropdownMenu.Group>
+                    <DropdownMenu.Item
+                      onSelect={() => copy(visible.map((entry) => entry.text).join('\n'))}
+                      ><Copy />Copy visible</DropdownMenu.Item
+                    >
+                    <DropdownMenu.Item onSelect={downloadVisible}
+                      ><Download />Download visible</DropdownMenu.Item
+                    >
+                  </DropdownMenu.Group>
+                </DropdownMenu.Content>
+              </DropdownMenu.Root>
+            {/if}
+          </div>
         </div>
       {/if}
-      <div class="log-footer">
-        <div class="muted">
-          {filtered.length} matching / {entries.length} loaded lines{lastUpdated
-            ? ` · Updated ${lastUpdated}`
-            : ''}<br />Initial view loads the latest {LOG_PAGE_SIZE} lines. Loaded history stays until
-          you leave this section or replace it.
-        </div>
-        <div class="actions">
-          <Button
-            variant="outline"
-            disabled={currentPage === 0}
-            onclick={() => (page = currentPage - 1)}>Previous lines</Button
-          ><span>Page {currentPage + 1} of {pageCount}</span><Button
-            variant="outline"
-            disabled={currentPage >= pageCount - 1}
-            onclick={() => (page = currentPage + 1)}>Next lines</Button
-          ><Button
-            variant="ghost"
-            disabled={!visible.length}
-            onclick={() => copy(visible.map((entry) => entry.text).join('\n'))}
-            ><Copy size={14} />Copy visible</Button
-          ><Button variant="ghost" disabled={!visible.length} onclick={downloadVisible}
-            ><Download size={14} />Download visible</Button
-          >
-        </div>
-      </div>
     </Tabs.Content>
-    <Tabs.Content value="requests" class="min-w-0">
+    <Tabs.Content value="requests" class="min-w-0 min-h-0 flex flex-col">
       <div class="toolbar">
         <div class="search">
           <Search size={16} /><Input
@@ -508,7 +614,7 @@
             oninput={() => (filePage = 0)}
           />
         </div>
-        <Button variant="outline" disabled={disabled || filesBusy} onclick={loadFiles}
+        <Button variant="ghost" disabled={disabled || filesBusy} onclick={loadFiles}
           ><RefreshCw size={14} />Refresh files</Button
         >
       </div>
@@ -543,45 +649,84 @@
               : 'Only files currently stored by the server appear here.'}
           </p>
         </div>{:else}
-        <ul class="file-list" aria-label="Saved request log files">
-          {#each filteredFiles.slice(currentFilePage * 50, (currentFilePage + 1) * 50) as file (file.name)}<li
-            >
-              <div class="file-info">
-                <strong>{file.name}</strong><span class="muted"
-                  >{fileSize(file.size)} · {new Date(file.modified * 1000).toLocaleString()} · {file.kind}</span
-                >
-              </div>
-              <div class="actions">
-                <Button
-                  variant="outline"
-                  {disabled}
-                  onclick={() => preview(file.name)}
-                  aria-label={`Preview ${file.name}`}>Preview</Button
-                ><Button
-                  variant="ghost"
-                  {disabled}
-                  href={client.getRequestLogDownloadURL(file.name)}
-                  download={file.name}
-                  aria-label={`Download ${file.name}`}><Download size={14} />Download</Button
-                >
-              </div>
-            </li>{/each}
-        </ul>
-      {/if}
-      <div class="log-footer">
-        <span class="muted">{filteredFiles.length} matching / {files.length} saved files</span>
-        <div class="actions">
-          <Button
-            variant="outline"
-            disabled={currentFilePage === 0}
-            onclick={() => (filePage = currentFilePage - 1)}>Previous files</Button
-          ><span>Page {currentFilePage + 1} of {filePageCount}</span><Button
-            variant="outline"
-            disabled={currentFilePage >= filePageCount - 1}
-            onclick={() => (filePage = currentFilePage + 1)}>Next files</Button
+        <Table.Root
+          class="min-w-[740px] table-fixed"
+          aria-label="Saved request log files"
+          containerProps={{
+            class: 'min-h-0 flex-1 overflow-auto',
+            role: 'region',
+            'aria-label': 'Request log files',
+            tabindex: 0
+          }}
+        >
+          <Table.Header sticky
+            ><Table.Row>
+              <Table.Head>File</Table.Head><Table.Head class="w-20">Kind</Table.Head>
+              <Table.Head class="w-24">Size</Table.Head><Table.Head class="w-44"
+                >Modified</Table.Head
+              >
+              <Table.Head class="w-36"><span class="sr-only">Actions</span></Table.Head>
+            </Table.Row></Table.Header
           >
+          <Table.Body>
+            {#each filteredFiles.slice(currentFilePage * 50, (currentFilePage + 1) * 50) as file (file.name)}
+              <Table.Row>
+                <Table.Cell><span class="file-name">{file.name}</span></Table.Cell>
+                <Table.Cell>{file.kind}</Table.Cell>
+                <Table.Cell>{fileSize(file.size)}</Table.Cell>
+                <Table.Cell
+                  ><span class="log-time">{formatDateTime(file.modified * 1000)}</span></Table.Cell
+                >
+                <Table.Cell
+                  ><div class="file-actions">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      {disabled}
+                      onclick={() => preview(file.name)}
+                      aria-label={`Preview ${file.name}`}>Preview</Button
+                    >
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      {disabled}
+                      href={client.getRequestLogDownloadURL(file.name)}
+                      download={file.name}
+                      aria-label={`Download ${file.name}`}><Download /></Button
+                    >
+                  </div></Table.Cell
+                >
+              </Table.Row>
+            {/each}
+          </Table.Body>
+        </Table.Root>
+      {/if}
+      {#if files.length}
+        <div class="log-footer">
+          <span class="muted"
+            >{filteredFiles.length === files.length
+              ? `${files.length.toLocaleString('de-DE')} ${files.length === 1 ? 'file' : 'files'}`
+              : `${filteredFiles.length.toLocaleString('de-DE')} of ${files.length.toLocaleString('de-DE')} files`}</span
+          >
+          {#if filePageCount > 1}<div class="footer-actions">
+              <span class="muted">Page {currentFilePage + 1} of {filePageCount}</span>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                disabled={currentFilePage === 0}
+                onclick={() => (filePage = currentFilePage - 1)}
+                aria-label="Previous files"><ChevronLeft /></Button
+              >
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                disabled={currentFilePage >= filePageCount - 1}
+                onclick={() => (filePage = currentFilePage + 1)}
+                aria-label="Next files"><ChevronRight /></Button
+              >
+            </div>{/if}
         </div>
-      </div>
+      {/if}
     </Tabs.Content>
   </Tabs.Root>
 </section>
@@ -606,6 +751,14 @@
       role="region"
       aria-label="Full log message">{detailText}</pre>
     <Dialog.Footer class="flex-wrap gap-2">
+      {#if !detailFile && detailThread}<Button
+          variant="secondary"
+          onclick={() => {
+            thread = detailThread;
+            page = 0;
+            detailOpen = false;
+          }}>Show this thread</Button
+        >{/if}
       {#if detailFile}<Button
           variant="outline"
           disabled={detailBusy || disabled}
@@ -630,11 +783,23 @@
 <style>
   .logs-panel {
     min-width: 0;
+    min-height: 0;
+    height: var(--logs-height, 100dvh);
+    display: flex;
+    flex-direction: column;
+    overflow: auto;
+  }
+  .logs-panel :global([data-slot='tabs']),
+  .logs-panel :global([data-slot='tabs-content']) {
+    overflow: auto;
+  }
+  .logs-panel :global([data-slot='table-container']) {
+    min-height: 128px;
   }
   .logs-panel :global(.log-tabs) {
     height: auto;
     flex-wrap: wrap;
-    max-width: calc(100% - 48px);
+    max-width: 100%;
   }
   .logs-panel :global(.log-tabs [data-slot='tabs-trigger']) {
     height: auto;
@@ -642,18 +807,79 @@
     white-space: normal;
   }
   .logs-panel :global(.log-tabs [data-slot='tabs-trigger']::after) {
-    display: none;
+    bottom: 0;
   }
   .toolbar,
-  .actions,
   .wrap-control {
     display: flex;
     align-items: center;
     gap: 10px;
     flex-wrap: wrap;
   }
+  .logs-panel :global([data-slot='tabs-content'] > :not([data-slot='table-container'])) {
+    flex-shrink: 0;
+  }
+  .logs-topbar {
+    flex-shrink: 0;
+  }
   .toolbar {
-    padding: 0 24px 16px;
+    padding: 16px 0;
+    justify-content: flex-start;
+  }
+  .logs-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .log-controls {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .log-filters {
+    display: grid;
+    grid-template-columns: minmax(12rem, 2fr) minmax(10rem, 1fr) auto auto;
+    gap: 12px;
+  }
+  .filter-options {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+  }
+  .log-time {
+    font-size: 12px;
+    color: var(--muted-foreground);
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+  }
+  @media (max-width: 1100px) {
+    .filter-options {
+      grid-column: 1 / -1;
+    }
+    .log-filters {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    }
+  }
+  @media (max-width: 700px) {
+    .control-label {
+      display: none;
+    }
+    .filter-options {
+      justify-content: flex-start;
+    }
+    .log-filters {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+    .log-filters > .search {
+      grid-column: 1 / -1;
+    }
   }
   .compact {
     padding-bottom: 14px;
@@ -687,95 +913,85 @@
     min-width: 0;
   }
   .log-message {
-    margin: 0 24px 16px;
+    margin: 0 0 12px;
     overflow-wrap: anywhere;
   }
-  .log-lines {
-    max-height: 560px;
-    overflow: auto;
-    border-block: 1px solid var(--border);
-  }
-  .log-lines:focus-visible,
+  .logs-panel :global([data-slot='table-container']):focus-visible,
   .detail-text:focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: -2px;
   }
-  .log-row {
-    display: grid;
-    grid-template-columns: max-content max-content minmax(0, 1fr);
-    gap: 8px;
-    text-align: left;
-    width: 100%;
-    padding: 8px 16px;
-    border-bottom: 1px solid var(--border);
-    font:
-      12px/1.7 ui-monospace,
-      SFMono-Regular,
-      Menlo,
-      monospace;
-    color: var(--foreground);
-  }
-  .log-row:hover {
-    background: var(--muted);
-  }
-  .log-row:focus-visible {
-    outline: 2px solid var(--ring);
-    outline-offset: -2px;
-  }
-  .line-number {
-    color: var(--muted-foreground);
-  }
   .level {
-    font-size: 11px;
+    font-size: 0.6875rem;
     text-transform: uppercase;
     color: var(--muted-foreground);
   }
   .level[data-level='error'] {
     color: var(--destructive);
   }
+  .level[data-level='info'] {
+    color: var(--info);
+  }
   .level[data-level='warn'] {
     color: var(--warning);
   }
+  .thread-filter {
+    flex: 1 1 15rem;
+    min-width: 0;
+  }
+  .log-context {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    white-space: normal;
+    color: var(--muted-foreground);
+    font-size: 0.75rem;
+    overflow-wrap: anywhere;
+    margin-top: 0.25rem;
+  }
   .line-text {
+    font:
+      13px/1.6 ui-monospace,
+      monospace;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     min-width: 0;
   }
-  .nowrap .line-text {
+  .line-text.nowrap {
     white-space: pre;
   }
-  .reset {
-    background: var(--muted);
+  .footer-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
   }
   .log-footer {
     display: flex;
-    gap: 16px;
+    align-items: center;
+    gap: 8px 16px;
     justify-content: space-between;
     flex-wrap: wrap;
-    padding: 16px 24px;
+    padding: 12px 0;
     font-size: 12px;
   }
-  .file-list {
-    margin: 0;
-    padding: 0;
-    list-style: none;
+  .thread-context {
+    display: grid;
+    gap: 4px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
   }
-  .file-list li {
+  .file-name {
+    display: block;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .file-actions {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    flex-wrap: wrap;
-    border-top: 1px solid var(--border);
-    padding: 16px 24px;
-  }
-  .file-info {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    min-width: 0;
-    flex: 1 1 250px;
-    overflow-wrap: anywhere;
+    gap: 4px;
   }
   .detail-text {
     white-space: pre-wrap;
@@ -786,7 +1002,7 @@
     padding-block: 16px;
     border-block: 1px solid var(--border);
     font:
-      12px/1.7 ui-monospace,
+      0.8125rem/1.65 ui-monospace,
       SFMono-Regular,
       Menlo,
       monospace;
@@ -797,17 +1013,12 @@
     }
   }
   @media (max-width: 480px) {
-    .toolbar {
-      padding-inline: 16px;
+    .toolbar,
+    .logs-topbar {
+      padding-inline: 0;
     }
-    .log-footer,
-    .file-list li {
-      padding-inline: 16px;
-    }
-    .log-row {
-      grid-template-columns: max-content max-content minmax(0, 1fr);
-      padding-inline: 8px;
-      gap: 5px;
+    .log-footer {
+      padding-inline: 0;
     }
     .log-message {
       margin-inline: 16px;

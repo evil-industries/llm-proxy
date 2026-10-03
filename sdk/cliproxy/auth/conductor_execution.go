@@ -571,6 +571,7 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 				execReq = attachResolvedAPIKeyModelInfo(routing, execReq, auth, routeModel, upstreamModel)
 			}
 			execCtx = syncMetadataSessionToContext(execCtx, execOpts.Metadata)
+			logThreadRouting(execCtx, auth, provider, routeModel, execOpts.Metadata)
 			startExec := time.Now()
 			resp, errExec := executor.Execute(execCtx, auth, execReq, execOpts)
 			errExec = markUpstreamExecutionAttemptFromContext(execCtx, errExec)
@@ -784,6 +785,7 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 				execReq = attachResolvedAPIKeyModelInfo(routing, execReq, auth, routeModel, upstreamModel)
 			}
 			execCtx = syncMetadataSessionToContext(execCtx, execOpts.Metadata)
+			logThreadRouting(execCtx, auth, provider, routeModel, execOpts.Metadata)
 			startExec := time.Now()
 			resp, errExec := executor.CountTokens(execCtx, auth, execReq, execOpts)
 			errExec = markUpstreamExecutionAttemptFromContext(execCtx, errExec)
@@ -1148,6 +1150,7 @@ func (m *Manager) executeStreamMixedOnce(ctx context.Context, providers []string
 		}
 		execOpts.Metadata = ensureCanonicalSessionMetadata(execOpts.Metadata, execOpts.Headers, payload)
 		execCtx = syncMetadataSessionToContext(execCtx, execOpts.Metadata)
+		logThreadRouting(execCtx, auth, provider, routeModel, execOpts.Metadata)
 		if homeMode && len(models) > 1 {
 			models = models[:1]
 			pooled = false
@@ -2120,4 +2123,20 @@ func syncMetadataSessionToContext(ctx context.Context, metadata map[string]any) 
 	}
 	ctx = logging.WithClientRequestMetadata(ctx, clientMeta)
 	return util.WithSessionID(ctx, clientMeta.SessionID)
+}
+
+// logThreadRouting correlates a request with its thread and opaque credential index.
+func logThreadRouting(ctx context.Context, auth *Auth, provider, model string, metadata map[string]any) {
+	if auth == nil {
+		return
+	}
+	threadID, _ := metadata[cliproxyexecutor.CanonicalSessionIDMetadataKey].(string)
+	if threadID == "" {
+		threadID, _ = metadata[cliproxyexecutor.LCPAffinitySessionIDMetadataKey].(string)
+	}
+	fields := log.Fields{"provider": provider, "model": model, "account_id": auth.EnsureIndex()}
+	if threadID != "" {
+		fields["thread_id"] = threadID
+	}
+	logEntryWithRequestID(ctx).WithFields(fields).Info("Upstream request routed")
 }

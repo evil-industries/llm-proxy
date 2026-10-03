@@ -122,3 +122,24 @@ func TestLogFormatterOmitsGenericPathField(t *testing.T) {
 		}
 	}
 }
+
+func TestLogFormatterThreadCorrelationAndTimezone(t *testing.T) {
+	entry := log.NewEntry(log.New())
+	entry.Time = time.Date(2026, 10, 3, 17, 30, 0, 0, time.FixedZone("CEST", 7200))
+	entry.Level = log.InfoLevel
+	entry.Message = "Upstream request routed"
+	entry.Data = log.Fields{"request_id": "req-1", "thread_id": "thread\n\"one", "account_id": "account-1"}
+	formatted, err := (&LogFormatter{}).Format(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(formatted)
+	for _, want := range []string{"[2026-10-03 17:30:00+02:00] [req-1]", `thread_id="thread\n\"one"`, `account_id="account-1"`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q in %q", want, text)
+		}
+	}
+	if strings.Count(text, "\n") != 1 {
+		t.Fatal("correlation fields injected a log line")
+	}
+}

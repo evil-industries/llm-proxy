@@ -6,7 +6,7 @@
 </script>
 
 <div class="p-6">
-  <Alert.Root variant={destructive ? 'destructive' : 'default'}>
+  <Alert.Root variant={destructive ? 'destructive' : 'info'}>
     <CircleAlert />
     <Alert.Title
       >{destructive ? 'Request could not be completed' : 'Account authorization'}</Alert.Title

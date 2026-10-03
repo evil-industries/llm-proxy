@@ -16,10 +16,11 @@
   } = $props();
   let reads = 0;
   const lines = $derived([
-    '[2026-09-17 09:04:11] [info] Server listening on :8317',
-    '[2026-09-17 09:04:24] [info] POST /v1/responses status=200',
-    '[2026-09-17 09:04:28] [warn] Credential temporarily unavailable; rotating provider',
-    '[2026-09-17 09:04:29] [error] ' +
+    '[2026-09-17 09:04:11+02:00] [info] Server listening on :8317',
+    '[2026-09-17 09:04:24+02:00] [req-demo] [info ] Upstream request routed provider=codex model=gpt-5 thread_id="demo-thread" account_id="account-1"',
+    '[2026-09-17 09:04:24+02:00] [req-demo] [info ] POST /v1/responses status=200',
+    '[2026-09-17 09:04:28+02:00] [warn] Credential temporarily unavailable; rotating provider',
+    '[2026-09-17 09:04:29+02:00] [error] ' +
       'connection-retry-with-long-diagnostic-context-'.repeat(long ? 40 : 1)
   ]);
   const client = createSessionManagementClient(async (input) => {

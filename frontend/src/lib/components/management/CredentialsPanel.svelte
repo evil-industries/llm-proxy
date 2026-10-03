@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { isCodex, codexPlan } from '$lib/codex';
+  import CodexDeviceAuth from './CodexDeviceAuth.svelte';
+  import ProviderIcon from '$lib/components/ProviderIcon.svelte';
   import AccountQuota from './AccountQuota.svelte';
   import { Search, Upload, Trash2, KeyRound } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button/index.js';
@@ -18,21 +21,23 @@
     onrefresh: () => Promise<void>;
     disabled?: boolean;
   } = $props();
+  let connectOpen = $state(false);
+  const connectionID = $props.id();
   let search = $state('');
-  let provider = $state('all');
+  let provider = $state<string>();
+  const selectedProvider = $derived(provider ?? (data.some(isCodex) ? 'codex' : 'all'));
+  const providerOf = (file: AuthFile) =>
+    (file.provider || file.type || 'Unknown').trim().toLowerCase();
   let busy = $state(false);
   let revision = $state(0);
   let error = $state('');
   let success = $state('');
   let deleting = $state<string | null>(null);
   let uploadInput: HTMLInputElement;
-  const providers = $derived(
-    [...new Set(data.map((file) => file.provider || file.type || 'Unknown'))].sort()
-  );
+  const providers = $derived([...new Set(data.map(providerOf))].sort());
   const filtered = $derived(
     data.filter((file) => {
-      const matchesProvider =
-        provider === 'all' || (file.provider || file.type || 'Unknown') === provider;
+      const matchesProvider = selectedProvider === 'all' || providerOf(file) === selectedProvider;
       return (
         matchesProvider &&
         `${file.name} ${file.email ?? ''} ${file.provider ?? file.type ?? ''}`
@@ -70,12 +75,24 @@
 <section class="panel" aria-labelledby="credentials-title">
   <div class="panel-header">
     <div class="section-heading">
-      <h2 id="credentials-title">Provider credentials</h2>
-      <p class="muted">Manage the accounts available to your proxy.</p>
+      <h2 id="credentials-title">
+        {selectedProvider === 'codex' ? 'Codex subscriptions' : 'Provider credentials'}
+      </h2>
     </div>
-    <Button variant="constructive" disabled={disabled || busy} onclick={() => uploadInput.click()}
-      ><Upload size={15} /> Upload JSON</Button
-    >
+    <div class="credential-actions">
+      <Button
+        variant="constructive"
+        aria-expanded={connectOpen}
+        aria-controls={connectionID}
+        onclick={() => (connectOpen = !connectOpen)}
+        ><ProviderIcon provider="codex" size={16} />{connectOpen
+          ? 'Close connection'
+          : 'Connect Codex'}</Button
+      >
+      <Button variant="ghost" disabled={disabled || busy} onclick={() => uploadInput.click()}
+        ><Upload size={15} /> Upload JSON</Button
+      >
+    </div>
     <input
       bind:this={uploadInput}
       type="file"
@@ -87,6 +104,9 @@
       onchange={upload}
     />
   </div>
+  {#if connectOpen}<div id={connectionID} class="connection-flow">
+      <CodexDeviceAuth {client} {disabled} live={!disabled} onconnected={onrefresh} />
+    </div>{/if}
   <div class="credential-toolbar">
     <div class="search-field">
       <Search size={16} aria-hidden="true" /><Input
@@ -95,7 +115,10 @@
         bind:value={search}
       />
     </div>
-    <select aria-label="Filter by provider" bind:value={provider}
+    <select
+      aria-label="Filter by provider"
+      value={selectedProvider}
+      onchange={(event) => (provider = event.currentTarget.value)}
       ><option value="all">All providers</option>{#each providers as item}<option value={item}
           >{item}</option
         >{/each}</select
@@ -114,7 +137,7 @@
       <p>
         {data.length
           ? 'Try another search or provider.'
-          : 'Connect a Codex account above, or import a provider credential JSON file.'}
+          : 'Connect a Codex account or upload a credential JSON file.'}
       </p>
     </div>
   {:else}
@@ -124,9 +147,11 @@
           <div class="credential-summary">
             <div class="credential-name">{file.name}</div>
             <div class="credential-meta">
-              <span>{file.provider || file.type || 'Unknown'}</span>{#if file.email}<span
-                  >{file.email}</span
-                >{/if}
+              <span
+                >{isCodex(file)
+                  ? `Codex · ${codexPlan(file) || 'Plan unavailable'}`
+                  : file.provider || file.type || 'Unknown'}</span
+              >{#if file.email}<span>{file.email}</span>{/if}
             </div>
             {#if file.runtime_only}<p class="status-message muted">
                 Runtime credential · No saved file
@@ -141,7 +166,7 @@
                 ? 'outline'
                 : file.unavailable || file.status === 'error'
                   ? 'destructive'
-                  : 'trust'}
+                  : 'constructive'}
               >{file.disabled
                 ? 'Disabled'
                 : file.unavailable
@@ -193,12 +218,20 @@
 </section>
 
 <style>
+  .credential-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .connection-flow {
+    padding: 0 0 24px;
+  }
   .credential-toolbar {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 12px;
-    padding: 18px 24px;
+    padding: 18px 0;
     border-bottom: 1px solid var(--border);
   }
   .search-field {
@@ -239,7 +272,7 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 18px;
-    padding: 20px 24px;
+    padding: 20px 0;
     border-bottom: 1px solid var(--border);
   }
   .credential-row:last-child {
@@ -279,7 +312,7 @@
   @media (max-width: 480px) {
     .credential-row,
     .credential-toolbar {
-      padding: 16px;
+      padding: 16px 0;
     }
     .search-field {
       max-width: none;

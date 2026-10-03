@@ -1,9 +1,19 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
+  import QuotaTime from './QuotaTime.svelte';
   import type { AuthFile } from '$lib/api';
-  import { accountQuota, quotaExpired, quotaStale, resetLabel, QUOTA_MAX_AGE } from '$lib/quota';
-  let { file }: { file: AuthFile } = $props();
+  import { accountQuota, quotaTone, quotaExpired, quotaStale, QUOTA_MAX_AGE } from '$lib/quota';
+  let {
+    file,
+    layout = 'stack',
+    displayName
+  }: { file: AuthFile; layout?: 'stack' | 'ledger'; displayName?: string } = $props();
   const quota = $derived(accountQuota(file));
   let now = $state(Date.now());
+  onMount(() => {
+    const timer = setInterval(() => (now = Date.now()), 30_000);
+    return () => clearInterval(timer);
+  });
   $effect(() => {
     const current = Math.max(now, Date.now());
     const deadlines = quota.windows.flatMap((window) => [
@@ -13,7 +23,7 @@
     if (quota.observed) deadlines.push(quota.observed + QUOTA_MAX_AGE);
     const next = Math.min(...deadlines.filter((time) => time > current));
     if (!Number.isFinite(next)) return;
-    // Only update local presentation when an observation ages or its reset passes.
+    // Also update precisely when a quota becomes stale or its reset passes.
     const timer = setTimeout(
       () => {
         now = Date.now();
@@ -24,15 +34,23 @@
   });
 </script>
 
-<div class="account-quota" aria-label={`Remaining usage for ${file.email || file.name}`}>
+<div
+  class="account-quota"
+  class:ledger={layout === 'ledger'}
+  aria-label={`Remaining usage for ${displayName ?? (file.email || file.name)}`}
+>
   {#if quota.windows.length}
     {#each quota.windows as window (window.key)}
       {@const expired = quotaExpired(window, now)}
       {@const stale = quotaStale(window, now)}
-      <div class="quota-window" class:stale>
+      <div
+        class="quota-window"
+        class:stale
+        data-quota-tone={quotaTone(window.remaining, stale || file.disabled || file.unavailable)}
+      >
         <div class="quota-heading">
           <span>{window.label}</span>
-          <strong class:low={!stale && window.remaining <= 10}>
+          <strong>
             {window.remaining.toLocaleString(undefined, { maximumFractionDigits: 1 })}% {stale
               ? 'last reported'
               : 'left'}
@@ -41,12 +59,8 @@
         <progress max="100" value={window.remaining} aria-label={`${window.label} remaining`}
         ></progress>
         <div class="quota-meta">
-          <span
-            >{window.reset === undefined
-              ? 'Reset time unavailable'
-              : `${expired ? 'Reset passed' : 'Resets'} · ${resetLabel(window.reset)}`}</span
-          >
-          <span>Observed {resetLabel(window.observed)}</span>
+          <QuotaTime timestamp={window.reset} {now} kind="reset" />
+          <QuotaTime timestamp={window.observed} {now} kind="observed" />
         </div>
         {#if stale}<p class="quota-note">
             {expired ? 'Awaiting usage after reset.' : 'Usage may be out of date.'} Updates when the provider
@@ -65,7 +79,11 @@
         ? ' · '
         : ''}{quota.resetCredits !== undefined ? `${quota.resetCredits} banked resets` : ''}
       {#if quota.observed}
-        · Observed {resetLabel(quota.observed)}{#if now - quota.observed >= QUOTA_MAX_AGE}
+        · <QuotaTime
+          timestamp={quota.observed}
+          {now}
+          kind="observed"
+        />{#if now - quota.observed >= QUOTA_MAX_AGE}
           · May be out of date{/if}{/if}
     </p>
   {/if}
@@ -77,6 +95,13 @@
     gap: 18px;
     min-width: 0;
     width: 100%;
+  }
+  .ledger {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+    gap: 24px;
+  }
+  .ledger > .quota-note {
+    grid-column: 1 / -1;
   }
   .quota-window {
     min-width: 0;
@@ -96,6 +121,7 @@
     overflow-wrap: anywhere;
   }
   strong {
+    color: var(--quota-color);
     font-variant-numeric: tabular-nums;
     font-size: 15px;
   }
@@ -114,18 +140,15 @@
     background: var(--muted);
   }
   progress::-webkit-progress-value {
-    background: var(--primary);
+    background: var(--quota-color);
     border-radius: 8px;
   }
   progress::-moz-progress-bar {
-    background: var(--primary);
+    background: var(--quota-color);
     border-radius: 8px;
   }
   .stale progress {
     opacity: 0.4;
-  }
-  .low {
-    color: var(--destructive);
   }
   .quota-meta,
   .quota-note {

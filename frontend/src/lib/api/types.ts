@@ -129,6 +129,8 @@ export interface PluginList {
 
 export interface LogsResponse {
   lines: string[];
+  /** Unix seconds aligned with lines; zero means no timestamp was recognized. */
+  timestamps?: number[];
   'line-count': number;
   'latest-timestamp': number;
   'next-cursor': string;
