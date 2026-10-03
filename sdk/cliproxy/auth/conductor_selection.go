@@ -583,14 +583,22 @@ func (m *Manager) availableAuthsForRouteModelWithPriorityMode(auths []*Auth, pro
 // availableAuthsForSelector reports the candidates handed to priority-scoped consumers such as
 // the plugin scheduler, plus the candidates handed to the configured selector. Both are equal
 // unless session affinity is active, in which case the selector additionally receives lower
-// priority tiers so an established binding can be validated instead of being preempted by a
-// recovered higher-priority credential.
+// priority tiers so an established binding can be validated. Upcoming quota resets only
+// influence new bindings and failover; healthy existing bindings stay on their account.
 func (m *Manager) availableAuthsForSelector(selector Selector, auths []*Auth, provider, routeModel string, now time.Time) (priorityAuths, selectorAuths []*Auth, err error) {
+	weightSelector := selector
+	if affinity, ok := selector.(*SessionAffinitySelector); ok {
+		weightSelector = affinity.fallback
+	}
+	if _, weighted := weightSelector.(*WeightedRoundRobinSelector); weighted {
+		auths = positiveWeightAuths(auths)
+	}
 	if _, sessionAffinity := selector.(*SessionAffinitySelector); !sessionAffinity {
 		priorityAuths, err = m.availableAuthsForRouteModel(auths, provider, routeModel, now)
 		if err != nil {
 			return nil, nil, err
 		}
+		priorityAuths = preferSoonestQuotaReset(priorityAuths, now, func(a *Auth) string { return m.selectionModelKeyForAuth(a, routeModel) })
 		priorityAuths = cloneAuthSlice(priorityAuths)
 		return priorityAuths, priorityAuths, nil
 	}
@@ -602,7 +610,8 @@ func (m *Manager) availableAuthsForSelector(selector Selector, auths []*Auth, pr
 		return nil, nil, err
 	}
 	selectorAuths = cloneAuthSlice(selectorAuths)
-	return highestPriorityAuths(selectorAuths), selectorAuths, nil
+	priorityAuths = preferSoonestQuotaReset(highestPriorityAuths(selectorAuths), now, func(a *Auth) string { return m.selectionModelKeyForAuth(a, routeModel) })
+	return priorityAuths, selectorAuths, nil
 }
 
 func selectionArgForSelector(selector Selector, routeModel string) string {
@@ -612,7 +621,7 @@ func selectionArgForSelector(selector Selector, routeModel string) string {
 	return routeModel
 }
 
-func selectorContextForAvailableAuths(ctx context.Context, selector Selector, routeModel string) context.Context {
+func selectorContextForAvailableAuths(ctx context.Context, selector Selector, routeModel string, preferred ...[]*Auth) context.Context {
 	ctx = withWeightedSelectorStateModel(ctx, selector, routeModel)
 	if !isBuiltInSelector(selector) {
 		if _, sessionAffinity := selector.(*SessionAffinitySelector); !sessionAffinity {
@@ -621,6 +630,13 @@ func selectorContextForAvailableAuths(ctx context.Context, selector Selector, ro
 	}
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if len(preferred) > 0 {
+		ids := make(map[string]bool, len(preferred[0]))
+		for _, auth := range preferred[0] {
+			ids[auth.ID] = true
+		}
+		ctx = context.WithValue(ctx, preferredFallbackAuthsKey{}, ids)
 	}
 	return context.WithValue(ctx, prevalidatedAuthCandidatesKey{}, true)
 }
@@ -932,6 +948,25 @@ func (m *Manager) pickViaPluginScheduler(ctx context.Context, scheduler PluginSc
 	strategy, okStrategy := builtinSchedulerStrategy(resp.DelegateBuiltin)
 	if !okStrategy {
 		return nil, false, nil
+	}
+	// A delegated scheduler must not reintroduce accounts excluded by reset ordering.
+	if !m.useSchedulerFastPath() {
+		excluded := make(map[string]struct{}, len(tried))
+		for id := range tried {
+			excluded[id] = struct{}{}
+		}
+		allowed := make(map[string]struct{}, len(candidates))
+		for _, candidate := range candidates {
+			allowed[candidate.ID] = struct{}{}
+		}
+		m.mu.RLock()
+		for id := range m.auths {
+			if _, ok := allowed[id]; !ok {
+				excluded[id] = struct{}{}
+			}
+		}
+		m.mu.RUnlock()
+		tried = excluded
 	}
 	return m.pickViaBuiltinScheduler(ctx, strategy, providerKey, providers, model, opts, tried)
 }
@@ -1561,7 +1596,16 @@ func (m *Manager) useSchedulerFastPath() bool {
 	if m == nil || m.scheduler == nil {
 		return false
 	}
-	return isBuiltInSelector(m.Selector())
+	// The indexed scheduler has no live quota ordering. Route observed accounts
+	// through the common selection path so HTTP, streaming, and affinity agree.
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, candidate := range m.auths {
+		if candidate != nil && (len(candidate.Quota.Signals) > 0 || hasModelQuotaSignals(candidate)) {
+			return false
+		}
+	}
+	return isBuiltInSelector(m.selector)
 }
 
 func shouldRetrySchedulerPick(err error) bool {
@@ -1653,7 +1697,7 @@ func (m *Manager) pickNextLegacy(ctx context.Context, provider, model string, op
 		return nil, nil, errPick
 	}
 	if !handled {
-		selectorCtx := selectorContextForAvailableAuths(ctx, selector, model)
+		selectorCtx := selectorContextForAvailableAuths(ctx, selector, model, available)
 		selected, errPick = selector.Pick(selectorCtx, provider, selectionArgForSelector(selector, model), opts, selectorAuths)
 		if errPick != nil {
 			if isBuiltInSelector(selector) {
@@ -1986,7 +2030,7 @@ func (m *Manager) pickNextMixedLegacy(ctx context.Context, providers []string, m
 		return nil, nil, "", errPick
 	}
 	if !handled {
-		selectorCtx := selectorContextForAvailableAuths(ctx, selector, model)
+		selectorCtx := selectorContextForAvailableAuths(ctx, selector, model, available)
 		selected, errPick = selector.Pick(selectorCtx, "mixed", selectionArgForSelector(selector, model), opts, selectorAuths)
 		if errPick != nil {
 			if isBuiltInSelector(selector) {

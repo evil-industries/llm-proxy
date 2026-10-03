@@ -246,6 +246,10 @@ quota-exceeded:
 
 # Routing strategy for selecting credentials when multiple match.
 routing:
+  # Local scheduling prefers the eligible Claude/Codex credential whose reported quota resets soonest.
+  # New threads and failover prefer the soonest reset; active threads keep their healthy account.
+  # Observations must be newer than 15 minutes; missing/expired reset data uses the strategy below.
+  # Tied resets also use this strategy. Home-managed dispatch is controlled by Home separately.
   strategy: "round-robin" # round-robin (default), weighted-round-robin, fill-first
   # weighted-round-robin uses each credential's integer weight (default 1, maximum 1,000,000).
   # Non-positive weights exclude the credential while this strategy is active.
@@ -255,10 +259,10 @@ routing:
   # followed by prompt_cache_key, Responses conversation IDs, legacy body IDs,
   # execution or derived session identity, and the existing first-message hash fallback.
   # Automatic failover is always enabled when bound auth becomes unavailable.
-  # An established binding outranks credential priority: once a session is bound, that
+  # An established binding outranks reset preferences and priority: that
   # credential is kept even if a higher-priority credential recovers. Credential priority
   # still decides cold bindings, requests without a session, and post-failover rebinding.
-  session-affinity: false # default: false
+  session-affinity: true # default: true
   # How long session-to-auth bindings are retained. Default: 1h
   session-affinity-ttl: "1h"
   # When true (default), subagents (child sessions with parent references) inherit and bind

@@ -6,10 +6,43 @@ import LoginPanel from '$lib/components/LoginPanel.svelte';
 import LoginPage from '../routes/login/+page.svelte';
 import { demoConfig, demoFiles, demoNotifications } from '$lib/demo';
 
-const sections = ['Overview', 'Usage', 'Credentials', 'API keys', 'Logs', 'Settings'] as const;
+const sections = [
+  'Overview',
+  'Quota management',
+  'Credentials',
+  'API keys',
+  'Logs',
+  'Settings'
+] as const;
 const longName = `production-${'credential'.repeat(24)}.json`;
 const longKey = `sk-${'long-key'.repeat(80)}`;
 const secret = 'management-test-secret-never-persist';
+
+test.each([390, 1280])(
+  'keeps log rows inside the remaining page height at %i pixels',
+  async (width) => {
+    await page.viewport(width, 900);
+    const { state } = mockServer();
+    state.lines = Array.from({ length: 200 }, (_, i) => `[info] Log event ${i}`);
+    await render(ManagementApp);
+    await loaded();
+    await navigate('Logs');
+    const output = page.getByRole('region', { name: 'Log output' });
+    await expect.element(output).toBeVisible();
+    const scroller = await output.element();
+    expect(scroller.scrollHeight).toBeGreaterThan(scroller.clientHeight);
+    expect(scroller.clientHeight).toBeGreaterThanOrEqual(128);
+    expect(document.documentElement.scrollHeight).toBeLessThanOrEqual(window.innerHeight + 1);
+    const main = document.querySelector('main')!;
+    expect(main.scrollHeight).toBeLessThanOrEqual(main.clientHeight + 1);
+    const header = scroller.querySelector('thead')!;
+    const top = header.getBoundingClientRect().top;
+    scroller.scrollTop = 300;
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    expect(header.getBoundingClientRect().top).toBeCloseTo(top, 0);
+    expect(scroller.getBoundingClientRect().bottom).toBeLessThan(window.innerHeight);
+  }
+);
 
 function mockServer() {
   const state = {
@@ -375,10 +408,10 @@ test('supports keyboard skip link and section navigation with visible focus', as
   const nav = page.getByRole('navigation', { name: 'Management sections' });
   await nav.getByRole('button', { name: 'Overview', exact: true }).click();
   await userEvent.tab();
-  await expect.element(nav.getByRole('button', { name: 'Usage', exact: true })).toHaveFocus();
+  await expect.element(nav.getByRole('button', { name: 'Credentials', exact: true })).toHaveFocus();
   expect(getComputedStyle(document.activeElement!).outlineStyle).not.toBe('none');
   await userEvent.keyboard('{Enter}');
-  await expect.element(page.getByRole('heading', { name: 'Usage', level: 1 })).toBeVisible();
+  await expect.element(page.getByRole('heading', { name: 'Credentials', level: 1 })).toBeVisible();
 });
 
 test('sign in and all management sections pass automated WCAG accessibility checks', async () => {

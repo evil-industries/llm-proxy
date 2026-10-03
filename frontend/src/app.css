@@ -22,6 +22,27 @@
   --color-constructive: var(--constructive);
   --color-constructive-foreground: var(--constructive-foreground);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-constructive-subtle: var(--constructive-subtle);
+  --color-constructive-border: var(--constructive-border);
+  --color-constructive-accent: var(--constructive-accent);
+  --color-constructive-accent-foreground: var(--constructive-accent-foreground);
+  --color-destructive-subtle: var(--destructive-subtle);
+  --color-destructive-border: var(--destructive-border);
+  --color-destructive-accent: var(--destructive-accent);
+  --color-destructive-accent-foreground: var(--destructive-accent-foreground);
+  --color-warning-subtle: var(--warning-subtle);
+  --color-warning-border: var(--warning-border);
+  --color-warning-accent: var(--warning-accent);
+  --color-warning-accent-foreground: var(--warning-accent-foreground);
+  --color-info-subtle: var(--info-subtle);
+  --color-info-border: var(--info-border);
+  --color-info-accent: var(--info-accent);
+  --color-info-accent-foreground: var(--info-accent-foreground);
   --color-border: var(--border);
   --color-input: #dedede;
   --color-ring: var(--ring);
@@ -42,15 +63,36 @@
   --background: #fff;
   --foreground: #171717;
   --primary: #171717;
-  --trust: #1d4ed8;
-  --trust-foreground: #fff;
-  --constructive: #16703c;
+  /* Neutral surfaces carry structure; color communicates action and state.
+     Accents echo Mastra; darker ink stays readable on light Geist-style surfaces. */
+  --constructive: #00652a;
   --constructive-foreground: #fff;
+  --constructive-accent: #00652a;
+  --constructive-accent-foreground: #fff;
   --constructive-subtle: #f0fdf4;
-  --destructive: #b42318;
-  --destructive-subtle: #fff5f5;
-  --warning: #925600;
-  --ring: #1d4ed8;
+  --constructive-border: #b6e5c5;
+  --destructive: #d0001b;
+  --destructive-foreground: #fff;
+  --destructive-accent: #d0001b;
+  --destructive-accent-foreground: #fff;
+  --destructive-subtle: #fff1f2;
+  --destructive-border: #ffdde0;
+  --warning: #8a4b00;
+  --warning-foreground: #fff;
+  --warning-accent: #fdac53;
+  --warning-accent-foreground: #4a2800;
+  --warning-subtle: #fff7e8;
+  --warning-border: #f3d4a5;
+  --info: #00658c;
+  --info-foreground: #fff;
+  --info-accent: #6ccdfb;
+  --info-accent-foreground: #07354a;
+  --info-subtle: #edf8ff;
+  --info-border: #b8def3;
+  /* Compatibility for existing authentication components. */
+  --trust: var(--info);
+  --trust-foreground: var(--info-foreground);
+  --ring: var(--info);
   --border: #e5e5e5;
   --muted: #f5f5f5;
   --muted-foreground: #666;
@@ -136,10 +178,8 @@ h3 {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .panel {
-  background: #fff;
-  border: 1px solid #e5e5e5;
-  border-radius: 9px;
   min-width: 0;
+  background: transparent;
 }
 .panel-header {
   display: flex;
@@ -147,8 +187,7 @@ h3 {
   align-items: center;
   flex-wrap: wrap;
   gap: 16px;
-  padding: 24px;
-  border-bottom: 1px solid var(--border);
+  padding: 0 0 20px;
 }
 .section-heading {
   display: grid;
@@ -270,7 +309,13 @@ select {
   color: var(--muted-foreground);
 }
 .status.attention {
+  color: var(--warning);
+}
+.status.error {
   color: var(--destructive);
+}
+.status.connecting {
+  color: var(--info);
 }
 .skip-link {
   position: fixed;
@@ -286,7 +331,7 @@ select {
 }
 @media (max-width: 640px) {
   .panel-header {
-    padding: 18px;
+    padding-bottom: 18px;
   }
   .data-table td,
   .data-table th {
@@ -303,4 +348,18 @@ select {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* Quota amounts keep their numeric labels; stale or unknown reports stay neutral. */
+[data-quota-tone] {
+  --quota-color: var(--muted-foreground);
+}
+[data-quota-tone='constructive'] {
+  --quota-color: var(--constructive);
+}
+[data-quota-tone='warning'] {
+  --quota-color: var(--warning);
+}
+[data-quota-tone='destructive'] {
+  --quota-color: var(--destructive);
 }

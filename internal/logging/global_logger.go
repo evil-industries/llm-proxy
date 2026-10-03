@@ -33,7 +33,7 @@ type LogFormatter struct{}
 
 // logFieldOrder defines the display order for common log fields.
 var logFieldOrder = []string{
-	"provider", "model",
+	"provider", "model", "thread_id", "account_id",
 	"plugin_id", "plugin_name", "source_id",
 	"version", "active_version", "retired_version", "overwritten",
 	"mode", "budget", "level", "original_mode", "original_value", "min", "max", "clamped_to", "error",
@@ -42,6 +42,8 @@ var logFieldOrder = []string{
 }
 
 var quotedLogFields = map[string]struct{}{
+	"thread_id":        {},
+	"account_id":       {},
 	"credential":       {},
 	"connection":       {},
 	"proxy_scheme":     {},
@@ -73,7 +75,7 @@ func (m *LogFormatter) Format(entry *log.Entry) ([]byte, error) {
 		buffer = &bytes.Buffer{}
 	}
 
-	timestamp := entry.Time.Format("2006-01-02 15:04:05")
+	timestamp := entry.Time.Format("2006-01-02 15:04:05Z07:00")
 	message := strings.TrimRight(entry.Message, "\r\n")
 
 	reqID := "--------"

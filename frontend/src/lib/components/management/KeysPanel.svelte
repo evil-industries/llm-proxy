@@ -75,7 +75,7 @@
   <div class="panel-header">
     <div class="section-heading">
       <h2 id="keys-title">API keys</h2>
-      <p class="muted">Control which clients can access your proxy.</p>
+
       {#if data.length > 0 && new Set(data.map((key) => key.trim()).filter(Boolean)).size === 1}
         <p class="muted">
           Add another key before deleting the final key. An empty key list disables API
@@ -174,7 +174,7 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 14px;
-    padding: 24px;
+    padding: 24px 0;
     border-bottom: 1px solid var(--border);
   }
   .key-field {
@@ -201,7 +201,7 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 18px;
-    padding: 20px 24px;
+    padding: 20px 0;
     border-bottom: 1px solid var(--border);
   }
   .key-row:last-child {
@@ -226,7 +226,7 @@
   @media (max-width: 480px) {
     .add-key-form,
     .key-row {
-      padding: 16px;
+      padding: 16px 0;
     }
   }
 </style>

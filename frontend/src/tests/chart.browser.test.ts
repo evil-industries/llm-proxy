@@ -1,10 +1,11 @@
+import { formatTime } from '$lib/datetime';
 import { expect, test } from 'vitest';
 import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
 import RequestChart from '$lib/components/RequestChart.svelte';
 import { demoFiles } from '$lib/demo';
 
-test('request activity shows only server-provided intervals and an accessible data alternative', async () => {
+test('legacy intervals retain counts without displaying unlocalized server times', async () => {
   render(RequestChart, {
     files: [
       {
@@ -26,8 +27,8 @@ test('request activity shows only server-provided intervals and an accessible da
     [...row.querySelectorAll('th, td')].map((cell) => cell.textContent?.trim())
   );
   expect(rows).toEqual([
-    ['23:50-00:00', '12', '2'],
-    ['00:00-00:10', '8', '0']
+    ['—', '12', '2'],
+    ['—', '8', '0']
   ]);
 });
 
@@ -138,8 +139,8 @@ test('DST fallback intervals retain separate bars and data rows', async () => {
     [...row.querySelectorAll('th, td')].map((cell) => cell.textContent?.trim())
   );
   expect(rows).toEqual([
-    ['02:00-02:10', '12', '2'],
-    ['02:00-02:10', '8', '1']
+    [`${formatTime(earlier * 1000)}–${formatTime((earlier + 600) * 1000)}`, '12', '2'],
+    [`${formatTime((earlier + 3600) * 1000)}–${formatTime((earlier + 4200) * 1000)}`, '8', '1']
   ]);
   await expect.poll(() => document.querySelectorAll('.lc-bars-bar').length).toBe(4);
   await expect

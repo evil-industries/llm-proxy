@@ -85,6 +85,9 @@
     gap: 26px;
   }
   .login-form {
+    background: var(--background);
+    border: 1px solid var(--border);
+    border-radius: 9px;
     padding: 26px;
     display: grid;
     gap: 24px;

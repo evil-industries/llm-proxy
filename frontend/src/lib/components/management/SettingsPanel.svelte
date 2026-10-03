@@ -103,7 +103,6 @@
   <div class="panel-header">
     <div class="section-heading">
       <h2 id="settings-title">Proxy settings</h2>
-      <p class="muted">Tune routing, observability, and access.</p>
     </div>
   </div>
   {#if error}<div class="error-banner" role="alert">{error}</div>{/if}
@@ -111,7 +110,7 @@
   <div class="routing-row">
     <div class="setting-copy">
       <h3><Shuffle size={16} /> Request routing</h3>
-      <p class="muted">Choose how requests are distributed across available credentials.</p>
+      <p class="muted">Choose the fallback when quota reset times are tied or unavailable.</p>
     </div>
     <div class="routing-controls">
       <select
@@ -132,6 +131,9 @@
       >
     </div>
     <p class="routing-help muted">
+      Local routing prefers eligible Claude and Codex accounts with the soonest fresh quota reset.
+      New threads and failover prefer the soonest reset within the same credential priority. Active
+      threads keep their healthy account. Home-managed routing is configured separately.
       {routing === 'fill-first'
         ? 'Use the first available credential until it is exhausted, then move to the next.'
         : routing === 'weighted-round-robin'
@@ -173,7 +175,7 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 16px 24px;
-    padding: 24px;
+    padding: 24px 0;
     border-bottom: 1px solid var(--border);
   }
   .setting-row:last-child {
@@ -225,7 +227,7 @@
   @media (max-width: 480px) {
     .routing-row,
     .setting-row {
-      padding: 18px 16px;
+      padding: 18px 0;
     }
   }
 </style>

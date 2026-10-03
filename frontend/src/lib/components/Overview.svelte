@@ -1,6 +1,7 @@
 <script lang="ts">
   import { ArrowUpRight, KeyRound, Activity } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button/index.js';
+  import ProviderIcon from './ProviderIcon.svelte';
   import RequestChart from './RequestChart.svelte';
   import type { AuthFile } from '$lib/api';
   let {
@@ -56,16 +57,15 @@
     <div class="panel-header">
       <div class="section-heading">
         <h2>Connected providers</h2>
-        <p class="muted">Credential availability across your instance.</p>
       </div>
-      <Button variant="outline" onclick={oncredentials}
+      <Button variant="ghost" onclick={oncredentials}
         >Manage credentials <ArrowUpRight size={14} /></Button
       >
     </div>
     {#if providers.length}
       <div class="provider-list">
         {#each providers as provider}<div class="provider-row">
-            <div class="provider-icon">{provider.name.slice(0, 1).toUpperCase()}</div>
+            <ProviderIcon provider={provider.name} size={28} />
             <div class="provider-name">
               <h3>{provider.name}</h3>
               <p class="muted">
@@ -89,12 +89,12 @@
         <KeyRound size={25} />
         <h3>No credentials connected</h3>
         <p>Upload a credential file to start routing requests.</p>
-        <Button variant="outline" onclick={oncredentials}>Manage credentials</Button>
+        <Button variant="ghost" onclick={oncredentials}>Manage credentials</Button>
       </div>{/if}
   </section>
   <div class="overview-footer">
     <Activity size={15} /><span
-      >Routing strategy <strong
+      >Routing fallback <strong
         >{strategy === 'fill-first'
           ? 'Fill first'
           : strategy === 'weighted-round-robin'
@@ -143,21 +143,11 @@
     align-items: center;
     gap: 15px;
     flex-wrap: wrap;
-    padding: 22px 24px;
+    padding: 22px 0;
     border-bottom: 1px solid #ededed;
   }
   .provider-row:last-child {
     border: 0;
-  }
-  .provider-icon {
-    width: 38px;
-    min-height: 38px;
-    padding: 7px;
-    display: grid;
-    place-items: center;
-    color: var(--trust);
-    font-weight: 600;
-    flex-shrink: 0;
   }
   .provider-name {
     flex: 1;
@@ -206,7 +196,7 @@
       font-size: 26px;
     }
     .provider-row {
-      padding: 18px;
+      padding: 18px 0;
       flex-wrap: wrap;
       gap: 12px;
     }

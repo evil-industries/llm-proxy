@@ -17,6 +17,8 @@ export const demoNotifications: NotificationSettings = {
   status: { enabled: false, configured: false, in_flight: false }
 };
 
+const latestBucket = Math.floor(Date.now() / 600000) * 600;
+
 export const demoFiles: AuthFile[] = [
   {
     name: 'anthropic-team.json',
@@ -41,6 +43,7 @@ export const demoFiles: AuthFile[] = [
         `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
       return {
         time: `${label(start)}-${label(start + 10)}`,
+        timestamp: latestBucket - (19 - index) * 600,
         success: [16, 22, 18, 32, 29, 41, 48, 36, 55, 42][index % 10] * 3,
         failed: index % 7 === 0 ? 3 : 0
       };
@@ -71,6 +74,7 @@ export const demoFiles: AuthFile[] = [
         `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
       return {
         time: `${label(start)}-${label(start + 10)}`,
+        timestamp: latestBucket - (19 - index) * 600,
         success: [16, 22, 18, 32, 29, 41, 48, 36, 55, 42][index % 10] * 2,
         failed: index % 7 === 0 ? 2 : 0
       };
@@ -90,6 +94,7 @@ export const demoFiles: AuthFile[] = [
         `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
       return {
         time: `${label(start)}-${label(start + 10)}`,
+        timestamp: latestBucket - (19 - index) * 600,
         success: [16, 22, 18, 32, 29, 41, 48, 36, 55, 42][index % 10] * 1,
         failed: index % 7 === 0 ? 1 : 0
       };
@@ -109,12 +114,37 @@ export const demoFiles: AuthFile[] = [
         `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
       return {
         time: `${label(start)}-${label(start + 10)}`,
+        timestamp: latestBucket - (19 - index) * 600,
         success: [16, 22, 18, 32, 29, 41, 48, 36, 55, 42][index % 10] * 0,
         failed: index % 7 === 0 ? 0 : 0
       };
     })
   }
 ];
+// Subscription-focused preview; the mixed-provider fixtures remain available to component stories.
+export const demoSubscriptions: AuthFile[] = demoFiles.map((file, index) => ({
+  ...file,
+  name: `codex-${['personal', 'workspace', 'secondary', 'backup'][index]}.json`,
+  provider: 'codex',
+  email: `${['personal', 'workspace', 'secondary', 'backup'][index]}@example.com`,
+  id_token: { plan_type: ['pro', 'plus', 'pro', 'plus'][index] },
+  quota: {
+    observed_at: new Date().toISOString(),
+    signals: {
+      'x-codex-plan-type': ['pro', 'plus', 'pro', 'plus'][index],
+      'x-codex-primary-used-percent': ['32', '24', '100', '15'][index],
+      'x-codex-primary-window-minutes': '300',
+      'x-codex-primary-reset-at': String(
+        Math.floor(Date.now() / 1000) + [10800, 3600, 1800, 7200][index]
+      ),
+      'x-codex-secondary-used-percent': ['58', '87', '36', '8'][index],
+      'x-codex-secondary-window-minutes': '10080',
+      'x-codex-secondary-reset-at': String(
+        Math.floor(Date.now() / 1000) + [172800, 259200, 86400, 432000][index]
+      )
+    }
+  }
+}));
 export const demoKeys = [
   'demo-key-workspace-not-a-real-secret',
   'demo-key-development-not-a-real-secret'

@@ -48,6 +48,7 @@ test('filters loaded history and opens full log details with keyboard and restor
   const { client } = fixture();
   render(LogsPanel, { client });
   await expect.element(page.getByRole('button', { name: 'Inspect log line 1' })).toBeVisible();
+  await expect.element(page.getByRole('table', { name: 'Server logs', exact: true })).toBeVisible();
   await page.getByLabelText('Search logs').fill('FAILED');
   await expect
     .element(page.getByRole('button', { name: 'Inspect log line 1' }))
@@ -163,7 +164,8 @@ test('keeps more than one rendered page without truncating loaded history and ex
   await page.getByRole('button', { name: 'Refresh logs' }).click();
   await expect.element(page.getByText('[error] later', { exact: true })).toBeVisible();
   await expect.element(page.getByText('Page 2 of 2')).toBeVisible();
-  await page.getByRole('button', { name: 'Download visible' }).click();
+  await page.getByRole('button', { name: 'Log actions' }).click();
+  await page.getByRole('menuitem', { name: 'Download visible' }).click();
   const blob = urls.mock.calls.at(-1)?.[0] as Blob;
   expect(await blob.text()).toBe('[error] later\n');
   await page.getByRole('button', { name: 'Previous lines' }).click();
@@ -176,6 +178,7 @@ test('lists saved request metadata, looks up exact IDs and appends byte-offset p
   render(LogsPanel, { client: state.client });
   await page.getByRole('tab', { name: 'Request logs', exact: true }).click();
   await expect.element(page.getByText(file.name, { exact: true })).toBeVisible();
+  await expect.element(page.getByRole('table', { name: 'Saved request log files' })).toBeVisible();
   await page.getByLabelText('Request ID', { exact: true }).fill('missing');
   await page.getByRole('button', { name: 'Find request' }).click();
   await expect.element(page.getByRole('alert')).toHaveTextContent('No saved log matches');
@@ -296,6 +299,11 @@ test.each([320, 1280])(
     for (const [element, size] of fonts) element.style.fontSize = `${size * 2}px`;
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width + 1);
     const previewButton = page.getByRole('button', { name: `Preview ${longFile.name}` });
+    (await previewButton.element()).scrollIntoView({
+      block: 'nearest',
+      inline: 'nearest',
+      behavior: 'instant'
+    });
     const buttonRect = (await previewButton.element()).getBoundingClientRect();
     expect(buttonRect.right).toBeLessThanOrEqual(width + 1);
     await previewButton.click();
@@ -342,7 +350,11 @@ test('copies the current page and announces detail copy results inside the dialo
   const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
   render(LogsPanel, { client: state.client });
   await expect.element(page.getByRole('button', { name: 'Inspect log line 1' })).toBeVisible();
-  await page.getByRole('button', { name: 'Copy visible', exact: true }).click();
+  await expect
+    .element(page.getByRole('button', { name: 'Previous lines' }))
+    .not.toBeInTheDocument();
+  await page.getByRole('button', { name: 'Log actions' }).click();
+  await page.getByRole('menuitem', { name: 'Copy visible', exact: true }).click();
   expect(copy).toHaveBeenLastCalledWith('[info] first request\n[error] failed request');
   await page.getByRole('button', { name: 'Inspect log line 2' }).click();
   await page.getByRole('button', { name: 'Copy message', exact: true }).click();
@@ -438,4 +450,22 @@ test('pauses instead of spinning when a full batch does not advance its cursor',
   state.poll();
   expect(state.requests).toHaveLength(2);
   await expect.element(page.getByText('[info] first request', { exact: true })).toBeVisible();
+});
+
+test('focuses a thread from line details and includes correlated request lines', async () => {
+  const { client } = fixture([
+    '[2026-10-03 12:00:00Z] [req1] [info ] Incoming request',
+    '[2026-10-03 12:00:00Z] [req1] [info ] Upstream request routed thread_id="thread-a" account_id="account-1"',
+    '[2026-10-03 12:00:00Z] [req2] [info ] Upstream request routed thread_id="thread-ab"'
+  ]);
+  render(LogsPanel, { client });
+  await page.getByRole('button', { name: 'Inspect log line 2' }).click();
+  await page.getByRole('button', { name: 'Show this thread' }).click();
+  await expect.element(page.getByLabelText('Filter by thread')).toHaveValue('thread-a');
+  await expect.element(page.getByRole('button', { name: 'Inspect log line 1' })).toBeVisible();
+  await expect
+    .element(page.getByRole('button', { name: 'Inspect log line 3' }))
+    .not.toBeInTheDocument();
+  await page.getByRole('button', { name: 'Clear filters' }).click();
+  await expect.element(page.getByRole('button', { name: 'Inspect log line 3' })).toBeVisible();
 });
