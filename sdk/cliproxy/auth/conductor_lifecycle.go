@@ -3,13 +3,13 @@ package auth
 import (
 	"context"
 	"fmt"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementevents"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	internalconfig "github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementevents"
 )
 
 // SetRetryConfig updates additional credential retry rounds, the per-round credential limit, and the cooldown wait interval.
@@ -48,14 +48,21 @@ func (m *Manager) RegisterExecutor(executor ProviderExecutor) {
 	m.executors[provider] = executor
 	for id, auth := range m.auths {
 		if auth != nil && strings.EqualFold(executorKeyFromAuth(auth), provider) {
+			requiresInfo := m.requiresAccountInfoLocked(auth)
+			if auth.accountInfoRequired != requiresInfo {
+				auth.accountInfoRequired = requiresInfo
+				auth.Generation++
+			}
 			toReschedule = append(toReschedule, id)
 		}
 	}
 	m.mu.Unlock()
 
 	for _, id := range toReschedule {
+		m.RefreshSchedulerEntry(id)
 		m.queueRefreshReschedule(id)
 	}
+	m.wakeAccountInfoRefresh()
 
 	if replaced == nil || replaced == executor {
 		return
@@ -115,6 +122,8 @@ func (m *Manager) Register(ctx context.Context, auth *Auth) (*Auth, error) {
 	m.authEpochs[auth.ID]++
 	auth.RegistrationEpoch = m.authEpochs[auth.ID]
 	auth.Generation = 1
+	auth.AccountSnapshot = nil
+	auth.accountInfoRequired = m.requiresAccountInfoLocked(auth)
 	authClone := auth.Clone()
 	m.auths[auth.ID] = authClone
 	m.mu.Unlock()
@@ -125,6 +134,7 @@ func (m *Manager) Register(ctx context.Context, auth *Auth) (*Auth, error) {
 		m.scheduler.upsertAuth(authClone.Clone())
 	}
 	m.queueRefreshReschedule(auth.ID)
+	m.wakeAccountInfoRefresh()
 	_ = m.persist(ctx, auth)
 	m.hook.OnAuthRegistered(ctx, auth.Clone())
 	if cooldownStateChanged {
@@ -251,6 +261,11 @@ func (m *Manager) updateInternal(ctx context.Context, base, auth *Auth, mode upd
 		cooldownStateChanged = clearCooldownStateForAuth(auth, now) || cooldownStateChanged
 	}
 	auth.EnsureIndex()
+	auth.accountInfoRequired = m.requiresAccountInfoLocked(auth)
+	auth.AccountSnapshot = nil
+	if !accountIdentityChanged(existing, auth) && (mode != updateModeReplace || !CredentialsChanged(existing, auth) || accountIdentityMatches(existing, auth)) {
+		auth.AccountSnapshot = existing.AccountSnapshot.Clone()
+	}
 	// A minted Meta key must reach the configured store before requests can use it.
 	// Keep the epoch check, save and installation together so a concurrent reload
 	// or removal cannot let an obsolete mint overwrite the credential on disk.
@@ -271,6 +286,7 @@ func (m *Manager) updateInternal(ctx context.Context, base, auth *Auth, mode upd
 		m.scheduler.upsertAuth(authClone.Clone())
 	}
 	m.queueRefreshReschedule(auth.ID)
+	m.wakeAccountInfoRefresh()
 	if !persistMetaMint {
 		_ = m.persist(ctx, auth)
 	}
@@ -382,6 +398,8 @@ func (m *Manager) Load(ctx context.Context) error {
 		m.authEpochs[auth.ID] = max(m.authEpochs[auth.ID], auth.RegistrationEpoch) + 1
 		auth.RegistrationEpoch = m.authEpochs[auth.ID]
 		auth.Generation = 1
+		auth.AccountSnapshot = nil
+		auth.accountInfoRequired = m.requiresAccountInfoLocked(auth)
 		m.auths[auth.ID] = auth.Clone()
 	}
 
@@ -413,6 +431,7 @@ func (m *Manager) Load(ctx context.Context) error {
 		}
 	}
 	m.syncScheduler()
+	m.wakeAccountInfoRefresh()
 	return nil
 }
 

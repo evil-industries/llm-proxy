@@ -181,8 +181,9 @@ type Manager struct {
 	rtProvider RoundTripperProvider
 
 	// Auto refresh state
-	refreshCancel context.CancelFunc
-	refreshLoop   *authAutoRefreshLoop
+	refreshCancel   context.CancelFunc
+	refreshLoop     *authAutoRefreshLoop
+	accountInfoLoop *accountInfoRefreshLoop
 
 	requestPrepareLocks sync.Map
 	// refreshLocks serializes credential refresh per auth ID so concurrent

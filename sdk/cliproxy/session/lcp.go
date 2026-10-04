@@ -942,7 +942,7 @@ func (m *MerklePrefixMatcher) LookupSession(sessionID string) (authIDs []string,
 			if group == nil || group.sessionID != sessionID {
 				continue
 			}
-			if now.Before(group.expiresAt) {
+			if !now.After(group.expiresAt) {
 				active = append(active, group)
 			} else {
 				expired = append(expired, group)
@@ -1018,7 +1018,7 @@ func (m *MerklePrefixMatcher) touchLocked(namespace string, fingerprints []strin
 	ns := m.namespaceLocked(namespace)
 	key := sequenceKey(fingerprints)
 	if existing := ns.groups[key]; existing != nil {
-		if !now.Before(existing.expiresAt) {
+		if now.After(existing.expiresAt) {
 			// Entry is expired; remove it and re-bind.
 			m.removeGroupLocked(existing)
 			m.bindLocked(namespace, fingerprints, minPrefixLength, authID, now)
@@ -1044,7 +1044,7 @@ func (m *MerklePrefixMatcher) bindLocked(namespace string, fingerprints []string
 	ns := m.namespaceLocked(namespace)
 	key := sequenceKey(fingerprints)
 	if existing := ns.groups[key]; existing != nil {
-		if now.Before(existing.expiresAt) {
+		if !now.After(existing.expiresAt) {
 			sessionID := existing.sessionID
 			parentSessionID := existing.parentSessionID
 			isFork := parentSessionID != ""
@@ -1236,7 +1236,7 @@ func (m *MerklePrefixMatcher) matchLocked(namespace string, fingerprints []strin
 func newestMatchingGroup(bucket map[string]*lcpGroup, fingerprints []string, now time.Time) *lcpGroup {
 	var best *lcpGroup
 	for _, group := range bucket {
-		if group == nil || !now.Before(group.expiresAt) || group.minPrefixLength > len(fingerprints) || len(group.fingerprints) < len(fingerprints) || !equalStrings(group.fingerprints[:len(fingerprints)], fingerprints) {
+		if group == nil || now.After(group.expiresAt) || group.minPrefixLength > len(fingerprints) || len(group.fingerprints) < len(fingerprints) || !equalStrings(group.fingerprints[:len(fingerprints)], fingerprints) {
 			continue
 		}
 		// Prefer the longest known trajectory so an exact prefix match on an earlier turn
@@ -1259,7 +1259,7 @@ func (m *MerklePrefixMatcher) nextAccessNumberLocked() uint64 {
 func (m *MerklePrefixMatcher) cleanupLocked(now time.Time) {
 	for _, namespace := range m.groups {
 		for _, group := range namespace.groups {
-			if !now.Before(group.expiresAt) {
+			if now.After(group.expiresAt) {
 				m.removeGroupLocked(group)
 			}
 		}

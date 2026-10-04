@@ -89,6 +89,9 @@ func (e authSelectionEligibility) allows(auth *Auth) bool {
 	if auth == nil {
 		return false
 	}
+	if auth.accountInfoRequired && auth.AccountSnapshot == nil {
+		return false
+	}
 	if e.requiredKind != "" && auth.AuthKind() != e.requiredKind {
 		return false
 	}
@@ -1601,7 +1604,7 @@ func (m *Manager) useSchedulerFastPath() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for _, candidate := range m.auths {
-		if candidate != nil && (len(candidate.Quota.Signals) > 0 || hasModelQuotaSignals(candidate)) {
+		if candidate != nil && (candidate.accountInfoRequired || len(candidate.Quota.Signals) > 0 || hasModelQuotaSignals(candidate)) {
 			return false
 		}
 	}
