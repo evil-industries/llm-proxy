@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"net/http"
 	"strconv"
 	"sync"
 	"testing"
@@ -61,6 +62,119 @@ func TestNextQuotaReset(t *testing.T) {
 				t.Fatalf("reset = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func queriedResetTestAuth(now time.Time) *Auth {
+	a := resetTestAuth("account", now, time.Hour)
+	a.AccountSnapshot = &AccountInfo{
+		Quota:         a.Quota.Clone(),
+		BankedResetAt: now.Add(15 * time.Minute),
+	}
+	a.AccountSnapshot.Quota.Signals["X-Codex-Secondary-Used-Percent"] = "30"
+	a.AccountSnapshot.Quota.Signals["X-Codex-Secondary-Reset-At"] = strconv.FormatInt(now.Add(30*time.Minute).Unix(), 10)
+	a.AccountSnapshot.Quota.Signals[codexResetCreditsCountHeader] = "2"
+	return a
+}
+
+func TestNextQuotaResetUsesEarliestRegularOrBanked(t *testing.T) {
+	now := time.Unix(1800000000, 0)
+	for _, tc := range []struct {
+		name   string
+		mutate func(*Auth)
+		want   time.Time
+	}{
+		{"banked", func(a *Auth) {}, now.Add(15 * time.Minute)},
+		{"primary", func(a *Auth) {
+			a.AccountSnapshot.Quota.Signals["X-Codex-Primary-Reset-At"] = strconv.FormatInt(now.Add(5*time.Minute).Unix(), 10)
+		}, now.Add(5 * time.Minute)},
+		{"secondary", func(a *Auth) {
+			a.AccountSnapshot.Quota.Signals["X-Codex-Secondary-Reset-At"] = strconv.FormatInt(now.Add(5*time.Minute).Unix(), 10)
+		}, now.Add(5 * time.Minute)},
+		{"zero banked count", func(a *Auth) {
+			a.AccountSnapshot.Quota.Signals[codexResetCreditsCountHeader] = "0"
+		}, now.Add(30 * time.Minute)},
+		{"missing banked count", func(a *Auth) {
+			delete(a.AccountSnapshot.Quota.Signals, codexResetCreditsCountHeader)
+		}, now.Add(30 * time.Minute)},
+		{"negative banked count", func(a *Auth) {
+			a.AccountSnapshot.Quota.Signals[codexResetCreditsCountHeader] = "-1"
+		}, now.Add(30 * time.Minute)},
+		{"fractional banked count", func(a *Auth) {
+			a.AccountSnapshot.Quota.Signals[codexResetCreditsCountHeader] = "1.5"
+		}, now.Add(30 * time.Minute)},
+		{"unknown banked expiry", func(a *Auth) {
+			a.AccountSnapshot.BankedResetAt = time.Time{}
+		}, now.Add(30 * time.Minute)},
+		{"expired banked", func(a *Auth) {
+			a.AccountSnapshot.BankedResetAt = now
+		}, now.Add(30 * time.Minute)},
+		{"stale query", func(a *Auth) {
+			a.AccountSnapshot.Quota.ObservedAt = now.Add(-quotaResetObservationMaxAge)
+		}, now.Add(time.Hour)},
+		{"future query observation", func(a *Auth) {
+			a.AccountSnapshot.Quota.ObservedAt = now.Add(time.Second)
+		}, now.Add(time.Hour)},
+		{"unavailable account", func(a *Auth) {
+			a.Unavailable = true
+		}, now.Add(30 * time.Minute)},
+		{"exhausted independent window", func(a *Auth) {
+			a.AccountSnapshot.Quota.Signals["X-Codex-Secondary-Used-Percent"] = "100"
+		}, time.Time{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := queriedResetTestAuth(now)
+			// Make the active query newer than the passive primary window.
+			a.Quota.ObservedAt = now.Add(-time.Second)
+			tc.mutate(a)
+			if got := nextQuotaReset(a, "", now); !got.Equal(tc.want) {
+				t.Fatalf("reset = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNextQuotaResetRetainsQueriedDeadlinesAfterPassiveReplacement(t *testing.T) {
+	now := time.Unix(1800000000, 0)
+	for _, tc := range []struct {
+		name    string
+		headers http.Header
+		want    time.Time
+	}{
+		{"count only", http.Header{codexResetCreditsCountHeader: {"1"}}, now.Add(15 * time.Minute)},
+		{"plan only", http.Header{"X-Codex-Plan-Type": {"pro"}}, now.Add(15 * time.Minute)},
+		{"regular without reset", http.Header{"X-Codex-Primary-Used-Percent": {"40"}, codexResetCreditsCountHeader: {"0"}}, now.Add(30 * time.Minute)},
+		{"new primary reset", http.Header{"X-Codex-Primary-Used-Percent": {"40"}, "X-Codex-Primary-Reset-At": {strconv.FormatInt(now.Add(5*time.Minute).Unix(), 10)}}, now.Add(5 * time.Minute)},
+		{"banked count cleared", http.Header{codexResetCreditsCountHeader: {"0"}}, now.Add(30 * time.Minute)},
+		{"new exhaustion", http.Header{"X-Codex-Secondary-Used-Percent": {"100"}}, time.Time{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := queriedResetTestAuth(now)
+			if !a.Quota.ObserveResponseHeadersForProvider("codex", tc.headers, now.Add(time.Second)) {
+				t.Fatal("passive snapshot was not replaced")
+			}
+			if got := nextQuotaReset(a, "", now.Add(time.Second)); !got.Equal(tc.want) {
+				t.Fatalf("reset = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNextQuotaResetQueryAndPassiveUseNewestWindow(t *testing.T) {
+	now := time.Unix(1800000000, 0)
+	a := queriedResetTestAuth(now)
+	a.AccountSnapshot.Quota.Signals[codexResetCreditsCountHeader] = "0"
+	a.Quota = resetTestAuth("", now.Add(-time.Minute), 5*time.Minute).Quota
+	if got := nextQuotaReset(a, "", now); !got.Equal(now.Add(30 * time.Minute)) {
+		t.Fatalf("older passive window overrode query: %v", got)
+	}
+	a.Quota = resetTestAuth("", now.Add(time.Second), 5*time.Minute).Quota
+	if got := nextQuotaReset(a, "", now.Add(time.Second)); !got.Equal(now.Add(time.Second + 5*time.Minute)) {
+		t.Fatalf("newer passive window did not override query: %v", got)
+	}
+	a.Quota.Signals["X-Codex-Primary-Reset-At"] = "invalid"
+	if got := nextQuotaReset(a, "", now.Add(time.Second)); !got.Equal(now.Add(30 * time.Minute)) {
+		t.Fatalf("invalid newer reset fell back to queried primary: %v", got)
 	}
 }
 

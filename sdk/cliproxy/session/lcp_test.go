@@ -399,6 +399,42 @@ func TestMerklePrefixMatcherTTLAndAuthInvalidation(t *testing.T) {
 	}
 }
 
+func TestMerklePrefixMatcherInactivityBoundary(t *testing.T) {
+	t.Parallel()
+
+	current := time.Unix(1800000000, 0)
+	const ttl = 5 * time.Minute
+	matcher := NewMerklePrefixMatcherWithConfig(MerklePrefixMatcherConfig{
+		TTL: ttl, NowFunc: func() time.Time { return current },
+	})
+	defer matcher.Clear()
+	namespace := "lcp:v1:inactivity:model:caller"
+	turns := turnsFromTexts("one")
+	sessionID := matcher.Bind(namespace, turns, "auth-a")
+
+	current = current.Add(ttl)
+	matcher.mu.Lock()
+	matcher.cleanupLocked(current)
+	matcher.mu.Unlock()
+	if ids, _, ok := matcher.LookupSession(sessionID); !ok || len(ids) != 1 || ids[0] != "auth-a" {
+		t.Fatalf("LookupSession() at lifetime = %v, %v, want [auth-a], true", ids, ok)
+	}
+	if matcher.Touch(namespace, turns, "auth-b") {
+		t.Fatal("delayed success replaced an active binding at the lifetime boundary")
+	}
+	if match, ok := matcher.Match(namespace, turns); !ok || match.AuthID != "auth-a" {
+		t.Fatalf("Match() at lifetime = %#v, %v, want auth-a, true", match, ok)
+	}
+	current = current.Add(ttl)
+	if !matcher.Touch(namespace, turns, "auth-a") {
+		t.Fatal("Touch() did not refresh the binding at its new lifetime boundary")
+	}
+	current = current.Add(ttl + time.Nanosecond)
+	if ids, _, ok := matcher.LookupSession(sessionID); ok || len(ids) != 0 {
+		t.Fatalf("LookupSession() after lifetime = %v, %v, want empty, false", ids, ok)
+	}
+}
+
 func TestMerklePrefixMatcherConcurrentAccess(t *testing.T) {
 	matcher := NewMerklePrefixMatcher(time.Minute)
 	defer matcher.Clear()

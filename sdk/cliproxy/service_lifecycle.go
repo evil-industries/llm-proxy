@@ -91,6 +91,7 @@ func (s *Service) Run(ctx context.Context) error {
 		})
 		interval := 15 * time.Minute
 		s.coreManager.StartAutoRefresh(ctx, interval)
+		s.coreManager.StartAccountInfoRefresh(ctx)
 		log.Infof("core auth auto-refresh started (interval=%s)", interval)
 	}
 
@@ -288,6 +289,7 @@ func (s *Service) Shutdown(ctx context.Context) error {
 			s.watcherCancel()
 		}
 		if s.coreManager != nil {
+			s.coreManager.StopAccountInfoRefresh()
 			s.coreManager.StopAutoRefresh()
 		}
 		if s.watcher != nil {

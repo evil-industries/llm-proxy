@@ -2,6 +2,7 @@ package auth
 
 import (
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -15,16 +16,14 @@ func nextQuotaReset(auth *Auth, model string, now time.Time) time.Time {
 	if auth == nil {
 		return time.Time{}
 	}
-	quota := auth.Quota
-	if state := auth.ModelStates[canonicalModelKey(model)]; state != nil && state.Quota.ObservedAt.After(quota.ObservedAt) {
-		quota = state.Quota
-	}
-	if quota.ObservedAt.IsZero() || quota.ObservedAt.After(now) || now.Sub(quota.ObservedAt) >= quotaResetObservationMaxAge {
+	observations := quotaResetObservations(auth, model, now)
+	if len(observations) == 0 {
 		return time.Time{}
 	}
-	signals := make(map[string]string, len(quota.Signals))
-	for key, value := range quota.Signals {
-		signals[strings.ToLower(key)] = strings.TrimSpace(value)
+	queriedUsable := false
+	if auth.AccountSnapshot != nil && freshQuotaResetObservation(auth.AccountSnapshot.Quota, now) {
+		blocked, _, _ := accountInfoQuotaBlock(auth, model, now)
+		queriedUsable = !blocked
 	}
 	var next time.Time
 	var prefixes []string
@@ -41,24 +40,14 @@ func nextQuotaReset(auth *Auth, model string, now time.Time) time.Time {
 		if strings.EqualFold(auth.Provider, "claude") {
 			suffix, scale, resetSuffix = "-utilization", 1, "-reset"
 		}
-		used, err := strconv.ParseFloat(signals[prefix+suffix], 64)
+		rawUsed, _ := latestQuotaResetSignal(observations, prefix+suffix)
+		used, err := strconv.ParseFloat(rawUsed, 64)
 		if err != nil || math.IsNaN(used) || math.IsInf(used, 0) || used < 0 || used > scale {
 			continue
 		}
-		var reset time.Time
-		if raw, exists := signals[prefix+resetSuffix]; exists {
-			seconds, errParse := strconv.ParseInt(raw, 10, 64)
-			if errParse == nil && seconds > 0 {
-				reset = time.Unix(seconds, 0)
-			}
-		} else if strings.EqualFold(auth.Provider, "codex") {
-			seconds, errParse := strconv.ParseInt(signals[prefix+"-reset-after-seconds"], 10, 64)
-			if errParse == nil && seconds >= 0 && seconds <= int64((time.Duration(1<<63-1))/time.Second) {
-				reset = quota.ObservedAt.Add(time.Duration(seconds) * time.Second)
-			}
-		}
+		reset := quotaWindowReset(observations, prefix, resetSuffix, strings.EqualFold(auth.Provider, "codex"))
 		// A reported exhausted window also blocks preference when its reset is unknown.
-		if used == scale && (reset.IsZero() || reset.After(now)) {
+		if used == scale && !queriedUsable && (reset.IsZero() || reset.After(now)) {
 			return time.Time{}
 		}
 		if !reset.After(now) {
@@ -68,7 +57,86 @@ func nextQuotaReset(auth *Auth, model string, now time.Time) time.Time {
 			next = reset
 		}
 	}
+	if strings.EqualFold(auth.Provider, "codex") && auth.AccountSnapshot != nil &&
+		freshQuotaResetObservation(auth.AccountSnapshot.Quota, now) && auth.AccountSnapshot.BankedResetAt.After(now) {
+		// Banked resets are optional expiring resources. Their deadline only
+		// affects routing preference; routing never redeems a reset credit.
+		rawCount, knownCount := latestQuotaResetSignal(observations, strings.ToLower(codexResetCreditsCountHeader))
+		count, validCount := normalizedResetCreditCount(rawCount)
+		blocked, _, _ := isAuthBlockedForModel(auth, model, now)
+		if knownCount && validCount && count != "0" && !blocked &&
+			(next.IsZero() || auth.AccountSnapshot.BankedResetAt.Before(next)) {
+			next = auth.AccountSnapshot.BankedResetAt
+		}
+	}
 	return next
+}
+
+type quotaResetObservation struct {
+	observedAt time.Time
+	signals    map[string]string
+}
+
+func freshQuotaResetObservation(quota QuotaState, now time.Time) bool {
+	return !quota.ObservedAt.IsZero() && !quota.ObservedAt.After(now) && now.Sub(quota.ObservedAt) < quotaResetObservationMaxAge
+}
+
+// Keep queried deadlines when a newer passive snapshot omits them, while an
+// explicitly reported value from the newer snapshot always takes precedence.
+func quotaResetObservations(auth *Auth, model string, now time.Time) []quotaResetObservation {
+	quotas := []QuotaState{auth.Quota}
+	if state := auth.ModelStates[canonicalModelKey(model)]; state != nil {
+		quotas = append(quotas, state.Quota)
+	}
+	if auth.AccountSnapshot != nil {
+		quotas = append(quotas, auth.AccountSnapshot.Quota)
+	}
+	observations := make([]quotaResetObservation, 0, len(quotas))
+	for _, quota := range quotas {
+		if !freshQuotaResetObservation(quota, now) {
+			continue
+		}
+		signals := make(map[string]string, len(quota.Signals))
+		for key, value := range quota.Signals {
+			signals[strings.ToLower(key)] = strings.TrimSpace(value)
+		}
+		observations = append(observations, quotaResetObservation{observedAt: quota.ObservedAt, signals: signals})
+	}
+	sort.SliceStable(observations, func(i, j int) bool {
+		return observations[i].observedAt.After(observations[j].observedAt)
+	})
+	return observations
+}
+
+func latestQuotaResetSignal(observations []quotaResetObservation, name string) (string, bool) {
+	for _, observation := range observations {
+		if value, exists := observation.signals[name]; exists {
+			return value, true
+		}
+	}
+	return "", false
+}
+
+func quotaWindowReset(observations []quotaResetObservation, prefix, resetSuffix string, allowRelative bool) time.Time {
+	for _, observation := range observations {
+		if raw, exists := observation.signals[prefix+resetSuffix]; exists {
+			seconds, errParse := strconv.ParseInt(raw, 10, 64)
+			if errParse == nil && seconds > 0 {
+				return time.Unix(seconds, 0)
+			}
+			return time.Time{}
+		}
+		if allowRelative {
+			if raw, exists := observation.signals[prefix+"-reset-after-seconds"]; exists {
+				seconds, errParse := strconv.ParseInt(raw, 10, 64)
+				if errParse == nil && seconds >= 0 && seconds <= int64((time.Duration(1<<63-1))/time.Second) {
+					return observation.observedAt.Add(time.Duration(seconds) * time.Second)
+				}
+				return time.Time{}
+			}
+		}
+	}
+	return time.Time{}
 }
 
 // preferSoonestQuotaReset preserves order for tied deadlines so the configured

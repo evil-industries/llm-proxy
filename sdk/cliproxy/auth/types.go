@@ -80,6 +80,10 @@ type Auth struct {
 	Metadata map[string]any `json:"metadata,omitempty"`
 	// Quota captures recent quota information for load balancers.
 	Quota QuotaState `json:"quota"`
+	// AccountSnapshot retains actively queried quota and account metadata independently
+	// of passive response snapshots. It must be queried again after loading credentials.
+	AccountSnapshot     *AccountInfo `json:"-"`
+	accountInfoRequired bool
 	// LastError stores the last failure encountered while executing or refreshing.
 	LastError *Error `json:"last_error,omitempty"`
 	// CreatedAt is the creation timestamp in UTC.
@@ -294,6 +298,7 @@ func (a *Auth) Clone() *Auth {
 	}
 	copyAuth := *a
 	copyAuth.Quota = a.Quota.Clone()
+	copyAuth.AccountSnapshot = a.AccountSnapshot.Clone()
 	if len(a.Attributes) > 0 {
 		copyAuth.Attributes = make(map[string]string, len(a.Attributes))
 		for key, value := range a.Attributes {

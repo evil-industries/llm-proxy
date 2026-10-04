@@ -168,3 +168,79 @@ func TestSessionCache_StopNilChannelNoPanic(t *testing.T) {
 	zeroCache := &SessionCache{}
 	zeroCache.Stop()
 }
+
+func TestSessionCache_InactivityBoundary(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name   string
+		beyond time.Duration
+		valid  bool
+	}{
+		{name: "at lifetime", valid: true},
+		{name: "past lifetime", beyond: time.Nanosecond},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			current := time.Unix(1800000000, 0)
+			cache := &SessionCache{ttl: time.Hour, nowFunc: func() time.Time { return current }}
+			cache.SetAliases("auth-1", "session-1", "alias-1")
+			current = current.Add(cache.ttl + test.beyond)
+			cache.cleanup()
+			for _, alias := range []string{"session-1", "alias-1"} {
+				authID, ok := cache.Get(alias)
+				if ok != test.valid || (ok && authID != "auth-1") {
+					t.Fatalf("Get(%q) = %q, %v, want valid=%v", alias, authID, ok, test.valid)
+				}
+			}
+			if !test.valid && cache.Len() != 0 {
+				t.Fatal("expired session aliases remained in the cache")
+			}
+		})
+	}
+}
+
+func TestSessionCache_InactivityRefreshAppliesToAllAliases(t *testing.T) {
+	t.Parallel()
+
+	current := time.Unix(1800000000, 0)
+	cache := &SessionCache{ttl: time.Hour, nowFunc: func() time.Time { return current }}
+	cache.SetAliases("auth-1", "session-1", "alias-1")
+
+	current = current.Add(cache.ttl)
+	if got, ok := cache.GetAndRefresh("alias-1"); !ok || got != "auth-1" {
+		t.Fatalf("GetAndRefresh() at lifetime = %q, %v, want auth-1, true", got, ok)
+	}
+	current = current.Add(cache.ttl)
+	if !cache.Touch("session-1", "auth-1") {
+		t.Fatal("Touch() did not refresh the session through its other alias")
+	}
+	current = current.Add(cache.ttl)
+	if got, ok := cache.Get("alias-1"); !ok || got != "auth-1" {
+		t.Fatalf("Get() after alias refresh = %q, %v, want auth-1, true", got, ok)
+	}
+
+	// An observation does not count as another message or extend affinity.
+	current = current.Add(time.Nanosecond)
+	if got, ok := cache.GetAndRefresh("session-1"); ok || got != "" {
+		t.Fatalf("GetAndRefresh() after inactivity = %q, %v, want empty, false", got, ok)
+	}
+	if cache.Len() != 0 {
+		t.Fatal("expired session left an alias that could restore affinity")
+	}
+}
+
+func TestSessionCache_SetAliasesAtInactivityBoundary(t *testing.T) {
+	t.Parallel()
+
+	current := time.Unix(1800000000, 0)
+	cache := &SessionCache{ttl: time.Hour, nowFunc: func() time.Time { return current }}
+	cache.SetAliases("auth-1", "session-1", "alias-1")
+	current = current.Add(cache.ttl)
+	cache.SetAliases("auth-1", "session-1", "alias-2")
+	current = current.Add(cache.ttl)
+	for _, alias := range []string{"session-1", "alias-1", "alias-2"} {
+		if got, ok := cache.Get(alias); !ok || got != "auth-1" {
+			t.Fatalf("Get(%q) = %q, %v, want auth-1, true", alias, got, ok)
+		}
+	}
+}
