@@ -34,7 +34,12 @@ services:
       ADDRESS_HEADER: x-forwarded-for
       XFF_DEPTH: '1'
       ORIGIN: ${ORIGIN:?Run npm run deploy:setup -- https://your-gateway.example first}
-      AUTH_PASSWORD_HASH: ${AUTH_PASSWORD_HASH:?Generate AUTH_PASSWORD_HASH first}
+      AUTH_MODE: ${AUTH_MODE:-password}
+      AUTH_PASSWORD_HASH: ${AUTH_PASSWORD_HASH:-}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_ALLOWED_USERS: ${OIDC_ALLOWED_USERS:-}
       PRIVATE_MANAGEMENT_URL: http://cli-proxy-api:8317
       PRIVATE_MANAGEMENT_KEY: ${PRIVATE_MANAGEMENT_KEY:?Generate the backend management key first}
     depends_on:

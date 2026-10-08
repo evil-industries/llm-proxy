@@ -9,6 +9,7 @@ import { loadConfiguration } from './config';
 const { environment } = vi.hoisted(() => ({ environment: {} as Record<string, string> }));
 vi.mock('$env/dynamic/private', () => ({ env: environment }));
 vi.mock('$app/environment', () => ({ dev: false }));
+vi.mock('$lib/server/oidc', () => import('./oidc'));
 vi.mock('$lib/server/auth', () => import('./auth'));
 vi.mock('$lib/server/config', () => import('./config'));
 vi.mock('$lib/server/relay', () => import('./relay'));

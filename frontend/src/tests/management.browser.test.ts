@@ -259,7 +259,7 @@ describe('responsive management screens in Chromium', () => {
       test(`${width}px viewport, ${zoom * 100}% text: sign in and every section remain readable`, async () => {
         await page.viewport(width, 900);
         mockServer();
-        const login = await render(LoginPage);
+        const login = await render(LoginPage, { data: { oidc: false, initialError: '' } });
         if (zoom === 2) enlargeText();
         await assertNoClipping('Sign in');
         await login.unmount();
@@ -417,7 +417,7 @@ test('supports keyboard skip link and section navigation with visible focus', as
 test('sign in and all management sections pass automated WCAG accessibility checks', async () => {
   await page.viewport(390, 900);
   mockServer();
-  const login = await render(LoginPage);
+  const login = await render(LoginPage, { data: { oidc: false, initialError: '' } });
   expect(await server.commands.auditAccessibility(), 'Sign in').toEqual([]);
   await login.unmount();
   await render(ManagementApp);
@@ -731,4 +731,23 @@ test('deletes the selected key by value without a GET preflight when another ope
         String(requestURL) === '/api/management/api-keys' && init?.method === 'GET'
     )
   ).toBe(true);
+});
+
+test('Authelia sign-in shows one provider action and no password field', async () => {
+  await render(LoginPanel, {
+    oidc: true,
+    initialError:
+      'Authelia sign-in failed or access was denied. Try again or contact your administrator.'
+  });
+  const button = page.getByRole('button', { name: 'Sign in with Authelia', exact: true });
+  await expect.element(button).toBeVisible();
+  await expect.element(page.getByLabelText('Password', { exact: true })).not.toBeInTheDocument();
+  const form = document.querySelector('form')!;
+  expect(form.getAttribute('method')).toBe('POST');
+  expect(form.getAttribute('action')).toBe('/auth/oidc/login');
+  await expect
+    .element(page.getByRole('alert'))
+    .toHaveTextContent(
+      'Authelia sign-in failed or access was denied. Try again or contact your administrator.'
+    );
 });
