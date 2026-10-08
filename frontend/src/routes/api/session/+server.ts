@@ -1,3 +1,4 @@
+import { oidcCookieName, oidcTransactions } from '$lib/server/oidc';
 import { deviceAuthSessions } from '$lib/server/device-auth';
 import { dev } from '$app/environment';
 import type { RequestHandler } from './$types';
@@ -21,6 +22,8 @@ export const POST: RequestHandler = async ({ request, url, locals, cookies, getC
     return safeJSON({ error: 'Request origin was not accepted.' }, 403);
   if (!locals.managementConfiguration)
     return safeJSON({ code: 'not_configured', error: locals.configurationError }, 503);
+  if (locals.managementConfiguration.oidc)
+    return safeJSON({ error: 'Use Authelia to sign in.' }, 403);
   if (!/^application\/json(?:\s*;|$)/i.test(request.headers.get('content-type') ?? ''))
     return safeJSON({ error: 'Send the password as JSON.' }, 415);
   const address = getClientAddress();
@@ -73,6 +76,11 @@ export const POST: RequestHandler = async ({ request, url, locals, cookies, getC
 export const DELETE: RequestHandler = ({ request, url, cookies, locals }) => {
   if (!sameOrigin(request, url))
     return safeJSON({ error: 'Request origin was not accepted.' }, 403);
+  const oidc = locals.managementConfiguration?.oidc;
+  if (oidc) {
+    oidcTransactions.consume(cookies.get(oidcCookieName(!dev)), oidc);
+    cookies.delete(oidcCookieName(!dev), { path: '/' });
+  }
   const name = sessionCookieName(!dev);
   const previousIdentity = authStore.identity(cookies.get(name));
   authStore.revoke(cookies.get(name));

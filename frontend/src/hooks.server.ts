@@ -28,7 +28,7 @@ export const handle: Handle = async ({ event, resolve }) => {
     : undefined;
   event.locals.authenticated = Boolean(event.locals.sessionIdentity);
   const path = event.url.pathname;
-  if (path !== '/login' && path !== '/api/session') {
+  if (!['/login', '/api/session', '/auth/oidc/login', '/auth/oidc/callback'].includes(path)) {
     if (path.startsWith('/v0/'))
       return safeJSON({ error: 'Direct management access is unavailable.' }, 404);
     if (!event.locals.managementConfiguration)
@@ -41,7 +41,10 @@ export const handle: Handle = async ({ event, resolve }) => {
   const response = await resolve(event);
   response.headers.set('Cache-Control', 'no-store');
   response.headers.set('X-Content-Type-Options', 'nosniff');
-  response.headers.set('Referrer-Policy', 'same-origin');
+  response.headers.set(
+    'Referrer-Policy',
+    path.startsWith('/auth/oidc/') ? 'no-referrer' : 'same-origin'
+  );
   response.headers.set('X-Frame-Options', 'DENY');
   return response;
 };

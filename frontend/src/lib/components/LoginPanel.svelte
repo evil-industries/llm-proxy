@@ -3,10 +3,12 @@
   import { Input } from '$lib/components/ui/input/index.js';
   let {
     onauthenticated = () => window.location.assign('/'),
-    initialError = ''
+    initialError = '',
+    oidc = false
   }: {
     onauthenticated?: () => void;
     initialError?: string;
+    oidc?: boolean;
   } = $props();
   let password = $state('');
   let busy = $state(false);
@@ -56,24 +58,37 @@
 <div class="login-panel">
   <div class="section-heading">
     <h1>Sign in</h1>
-    <p class="muted">Enter your password to access management.</p>
+    <p class="muted">
+      {oidc
+        ? 'Use your Authelia account to access management.'
+        : 'Enter your password to access management.'}
+    </p>
   </div>
-  <form class="panel login-form" onsubmit={login}>
-    <div class="field">
-      <label for="password">Password</label><Input
-        id="password"
-        name="password"
-        type="password"
-        autocomplete="current-password"
-        bind:value={password}
-        required
-        maxlength={1024}
-        disabled={busy}
-      />
-    </div>
-    {#if error || initialError}<p class="error-banner" role="alert">{error || initialError}</p>{/if}
-    <Button type="submit" disabled={busy || !password}>{busy ? 'Signing in…' : 'Sign in'}</Button>
-  </form>
+  {#if oidc}
+    <form class="panel login-form" method="POST" action="/auth/oidc/login">
+      {#if initialError}<p class="error-banner" role="alert">{initialError}</p>{/if}
+      <Button type="submit">Sign in with Authelia</Button>
+    </form>
+  {:else}
+    <form class="panel login-form" onsubmit={login}>
+      <div class="field">
+        <label for="password">Password</label><Input
+          id="password"
+          name="password"
+          type="password"
+          autocomplete="current-password"
+          bind:value={password}
+          required
+          maxlength={1024}
+          disabled={busy}
+        />
+      </div>
+      {#if error || initialError}<p class="error-banner" role="alert">
+          {error || initialError}
+        </p>{/if}
+      <Button type="submit" disabled={busy || !password}>{busy ? 'Signing in…' : 'Sign in'}</Button>
+    </form>
+  {/if}
 </div>
 
 <style>

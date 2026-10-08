@@ -1,0 +1,32 @@
+# Merge these entries into the existing Authelia identity provider configuration.
+# Retain the existing signing keys, storage, and other clients.
+identity_providers:
+  oidc:
+    authorization_policies:
+      llm_management:
+        default_policy: deny
+        rules:
+          - policy: one_factor
+            subject: 'user:julius'
+    clients:
+      - client_id: llm-proxy-management
+        client_name: llm.rose.sh management
+        # Replace this value with the digest of OIDC_CLIENT_SECRET.
+        client_secret: REPLACE_WITH_CLIENT_SECRET_DIGEST
+        public: false
+        authorization_policy: llm_management
+        redirect_uris:
+          - https://llm.rose.sh/auth/oidc/callback
+        scopes:
+          - openid
+          - profile
+        grant_types:
+          - authorization_code
+        response_types:
+          - code
+        response_modes:
+          - query
+        require_pkce: true
+        pkce_challenge_method: S256
+        token_endpoint_auth_method: client_secret_basic
+        id_token_signed_response_alg: RS256
