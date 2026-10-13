@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -48,6 +49,7 @@ type ResponseWriterWrapper struct {
 	statusCode          int                        // statusCode stores the HTTP status code of the response.
 	headers             map[string][]string        // headers stores the response headers.
 	preserveLogs        bool                       // preserveLogs retains captured data until publication succeeds.
+	preserveLatched     atomic.Bool                // preserveLatched retains archival enabled during an ongoing request.
 	logOnErrorOnly      bool                       // logOnErrorOnly enables logging only when an error response is detected.
 	firstChunkTimestamp time.Time                  // firstChunkTimestamp captures TTFB for streaming responses.
 }
@@ -73,6 +75,23 @@ func NewResponseWriterWrapper(w gin.ResponseWriter, logger logging.RequestLogger
 	}
 }
 
+// preservingLogs observes hot-enabled archival and never reverts this request to
+// dropping chunks. Propagate the policy before handing chunks to the next queue.
+func (w *ResponseWriterWrapper) preservingLogs() bool {
+	preserve := w.preserveLogs || w.preserveLatched.Load() || logarchive.Enabled()
+	if writer, ok := w.streamWriter.(interface{ PreservingLogs() bool }); ok {
+		preserve = writer.PreservingLogs() || preserve
+	}
+	if preserve {
+		w.preserveLatched.Store(true)
+		if writer, ok := w.streamWriter.(interface{ PreserveLogs() }); ok {
+			writer.PreserveLogs()
+		}
+		return true
+	}
+	return false
+}
+
 // Write wraps the underlying ResponseWriter's Write method to capture response data.
 // For non-streaming responses, it writes to an internal buffer. Streaming chunks
 // use a bounded channel, with backpressure when permanent archival is enabled.
@@ -91,7 +110,7 @@ func (w *ResponseWriterWrapper) Write(data []byte) (int, error) {
 		if w.firstChunkTimestamp.IsZero() {
 			w.firstChunkTimestamp = time.Now()
 		}
-		if w.preserveLogs {
+		if w.preservingLogs() {
 			w.chunkChannel <- append([]byte(nil), data...)
 			return n, err
 		}
@@ -143,7 +162,7 @@ func (w *ResponseWriterWrapper) WriteString(data string) (int, error) {
 		if w.firstChunkTimestamp.IsZero() {
 			w.firstChunkTimestamp = time.Now()
 		}
-		if w.preserveLogs {
+		if w.preservingLogs() {
 			w.chunkChannel <- []byte(data)
 			return n, err
 		}
@@ -272,16 +291,23 @@ func (w *ResponseWriterWrapper) processStreamingChunks(done chan struct{}, chunk
 // For non-streaming responses, it logs the complete request and response details,
 // including any API-specific request/response data stored in the Gin context.
 func (w *ResponseWriterWrapper) Finalize(c *gin.Context) (finalErr error) {
-	preserve := w.preserveLogs
+	w.preservingLogs()
 	websocketTimelineSource := w.extractWebsocketTimelineSource(c)
 	apiRequestSource := w.extractAPIRequestSource(c)
 	apiResponseSource := w.extractAPIResponseSource(c)
 	apiWebsocketTimelineSource := w.extractAPIWebsocketTimelineSource(c)
 	defer func() {
+		preserve := w.preservingLogs()
 		// Failed publication must leave complete source fragments available for
 		// recovery. A successful or intentionally unlogged request can clean up.
 		if !preserve || finalErr == nil {
 			cleanupFileBodySources(websocketTimelineSource, apiRequestSource, apiResponseSource, apiWebsocketTimelineSource)
+		} else {
+			// Handler and streaming writers have finished; their retained source
+			// files can now be retried by the running archive worker.
+			for _, source := range []*logging.FileBodySource{websocketTimelineSource, apiRequestSource, apiResponseSource, apiWebsocketTimelineSource} {
+				source.Recover()
+			}
 		}
 		if w.requestInfo != nil && w.requestInfo.deferredBodyCapture != nil {
 			capture := w.requestInfo.deferredBodyCapture
@@ -289,6 +315,8 @@ func (w *ResponseWriterWrapper) Finalize(c *gin.Context) (finalErr error) {
 				capture.Cleanup()
 			} else if errFinish := capture.Finish(); errFinish != nil {
 				log.WithError(errFinish).Warn("failed to close preserved request body capture")
+			} else {
+				capture.source.Recover()
 			}
 		}
 	}()
@@ -333,6 +361,7 @@ func (w *ResponseWriterWrapper) Finalize(c *gin.Context) (finalErr error) {
 		streamWriter := w.streamWriter
 		defer func() {
 			finalErr = errors.Join(finalErr, streamWriter.Close())
+			w.preservingLogs()
 			w.streamWriter = nil
 		}()
 		streamWriter.SetFirstChunkTimestamp(w.firstChunkTimestamp)

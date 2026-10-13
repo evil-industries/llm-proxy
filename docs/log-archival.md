@@ -56,15 +56,22 @@ as preserving a local copy for S3. No Home protocol change is required.
 
 The background worker archives completed request/error files and application logs
 after rotation. `main.log` remains local while active; application logs currently
-rotate at 10 MB. Uploading and verification stream bytes with bounded memory.
+rotate at 10 MB. Disabling file logging also publishes the final segment for
+archival. Uploading and verification stream bytes with bounded memory.
 Compression needs temporary disk space. Failed uploads or failed integrity checks
 leave the source log available for retry, including after a restart.
 
-After a restart, recognized orphaned request bodies, log fragments, and unfinished
-log files are preserved as separately downloadable `recovered-*` archives. They
-contain the bytes captured before interruption, rather than a reconstructed
-complete request. Files still being written in the current process are never
-treated as crash leftovers.
+Failed request publication queues closed request bodies, log fragments, and
+unfinished log files for recovery on the next archive scan. After a restart,
+recognized orphaned files are recovered too. These separately downloadable
+`recovered-*` archives contain the bytes captured before interruption, rather
+than a reconstructed complete request. Files still being written in the current
+process are never treated as crash leftovers.
+
+Enabling archival during a streaming request applies backpressure to subsequent
+chunks in both capture queues. The request keeps that preservation policy through
+finalization even if archival is disabled again. Bytes dropped before archival
+was enabled cannot be recovered.
 
 While archival is enabled, `logs-max-total-size-mb`, `error-logs-max-files`, and
 the management clear-logs action cannot discard unarchived history. No archive

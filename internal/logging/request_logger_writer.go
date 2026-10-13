@@ -67,9 +67,17 @@ func (l *FileRequestLogger) LogRequestWithOptionsAndAllSources(url, method strin
 func (l *FileRequestLogger) logRequestWithSources(url, method string, requestHeaders map[string][]string, body []byte, statusCode int, responseHeaders map[string][]string, response, websocketTimeline []byte, websocketTimelineSource *FileBodySource, apiRequest []byte, apiRequestSource *FileBodySource, apiResponse []byte, apiResponseSource *FileBodySource, apiWebsocketTimeline []byte, apiWebsocketTimelineSource *FileBodySource, apiResponseErrors []*interfaces.ErrorMessage, force bool, requestID string, requestTimestamp, apiResponseTimestamp time.Time) error {
 	preserve := logarchive.Enabled()
 	completed := false
+	var pendingPath, requestBodyPath string
 	defer func() {
-		if !preserve || completed {
-			cleanupFileBodySources(websocketTimelineSource, apiRequestSource, apiResponseSource, apiWebsocketTimelineSource)
+		if (preserve || logarchive.Enabled()) && !completed {
+			l.archiveDirectory.Recover(pendingPath, requestBodyPath)
+			recoverFileBodySources(websocketTimelineSource, apiRequestSource, apiResponseSource, apiWebsocketTimelineSource)
+			return
+		}
+		cleanupFileBodySources(websocketTimelineSource, apiRequestSource, apiResponseSource, apiWebsocketTimelineSource)
+		removeRequestStagingFile(requestBodyPath)
+		if !completed {
+			removeRequestStagingFile(pendingPath)
 		}
 	}()
 	var homeText string
@@ -130,19 +138,10 @@ func (l *FileRequestLogger) logRequestWithSources(url, method string, requestHea
 	}
 	filePath := filepath.Join(l.logsDir, filename)
 
-	requestBodyPath, errTemp := l.writeRequestBodyTempFile(body)
+	var errTemp error
+	requestBodyPath, errTemp = l.writeRequestBodyTempFile(body)
 	if errTemp != nil {
 		log.WithError(errTemp).Warn("failed to create request body temp file, falling back to direct write")
-	}
-	if requestBodyPath != "" {
-		defer func() {
-			if preserve && !completed {
-				return
-			}
-			if errRemove := os.Remove(requestBodyPath); errRemove != nil {
-				log.WithError(errRemove).Warn("failed to remove request body temp file")
-			}
-		}()
 	}
 
 	responseToWrite, decompressErr := l.decompressResponse(responseHeaders, response)
@@ -156,6 +155,7 @@ func (l *FileRequestLogger) logRequestWithSources(url, method string, requestHea
 		return fmt.Errorf("failed to create log file: %w", errOpen)
 	}
 
+	pendingPath = logFile.Name()
 	writeErr := l.writeNonStreamingLog(
 		logFile,
 		url,
@@ -267,6 +267,7 @@ func (l *FileRequestLogger) LogStreamingRequest(url, method string, headers map[
 	// Create streaming writer
 	writer := &FileStreamingLogWriter{
 		logFilePath:      filePath,
+		archiveDirectory: l.archiveDirectory,
 		preserve:         logarchive.Enabled(),
 		homeEnabled:      l.homeEnabled,
 		requestID:        requestID,
@@ -445,4 +446,13 @@ func (l *FileRequestLogger) writeRequestBodyTempFile(body []byte) (string, error
 		return "", errClose
 	}
 	return tmpPath, nil
+}
+
+func removeRequestStagingFile(path string) {
+	if path == "" {
+		return
+	}
+	if errRemove := os.Remove(path); errRemove != nil && !os.IsNotExist(errRemove) {
+		log.WithError(errRemove).Warn("failed to remove request log staging file")
+	}
 }

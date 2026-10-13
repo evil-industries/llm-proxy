@@ -9,8 +9,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/logarchive"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementevents"
@@ -213,11 +215,24 @@ func ConfigureLogOutput(cfg *config.Config) error {
 		}
 		log.SetOutput(eventLogWriter{logWriter})
 	} else {
+		// SetOutput serializes against in-flight logrus writes. The old writer
+		// must have no remaining producers when its final segment is published.
+		log.SetOutput(os.Stdout)
+		closedPath := filepath.Join(logDir, "main.log")
 		if logWriter != nil {
-			_ = logWriter.Close()
+			closedPath = logWriter.Filename
+			if errClose := logWriter.Close(); errClose != nil {
+				return fmt.Errorf("logging: close application log: %w", errClose)
+			}
 			logWriter = nil
 		}
-		log.SetOutput(os.Stdout)
+		if cfg.LogArchive.Enabled {
+			// This also recovers a previous process's final main.log when the
+			// replacement process starts with file logging disabled.
+			if errPublish := publishClosedApplicationLog(closedPath); errPublish != nil {
+				return errPublish
+			}
+		}
 	}
 
 	stopLogDirCleanerLocked()
@@ -225,6 +240,24 @@ func ConfigureLogOutput(cfg *config.Config) error {
 		return fmt.Errorf("logging: configure archive: %w", errArchive)
 	}
 	configureLogDirCleanerLocked(logDir, cfg.LogsMaxTotalSizeMB, protectedPath)
+	return nil
+}
+
+func publishClosedApplicationLog(path string) error {
+	info, errStat := os.Lstat(path)
+	if os.IsNotExist(errStat) {
+		return nil
+	}
+	if errStat != nil {
+		return fmt.Errorf("logging: inspect final application log: %w", errStat)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("logging: final application log is not a regular file")
+	}
+	name := "main-" + time.Now().Format("2006-01-02T15-04-05.000") + "." + uuid.NewString() + ".log"
+	if errRename := os.Rename(path, filepath.Join(filepath.Dir(path), name)); errRename != nil {
+		return fmt.Errorf("logging: publish final application log: %w", errRename)
+	}
 	return nil
 }
 

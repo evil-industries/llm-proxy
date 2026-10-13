@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 )
 
 type recordingUploader struct {
@@ -38,7 +40,10 @@ func (u *recordingUploader) UploadVerified(_ context.Context, key, path string) 
 	return nil
 }
 func testWorker(dir string, uploader verifiedUploader) *manager {
-	return &manager{store: uploader, directories: func() []string { return []string{dir} }}
+	directoryState.Lock()
+	registry := directoryState.current
+	directoryState.Unlock()
+	return &manager{store: uploader, directories: func() []string { return []string{dir} }, registry: registry}
 }
 func writeFixture(t *testing.T, path string, contents []byte) {
 	t.Helper()
@@ -266,5 +271,169 @@ func TestManagerArchivesLegacyApplicationRotations(t *testing.T) {
 		if err != nil || string(raw) != "keep local" {
 			t.Fatalf("excluded file %s changed: %v", name, err)
 		}
+	}
+}
+
+func configureTestRegistry(t *testing.T, dir, bucket string) *directoryRegistry {
+	t.Helper()
+	// Keep the real configuration lifecycle, but prevent a network worker from
+	// starting; the test drives its replacement uploader synchronously.
+	if err := Configure(dir, config.LogArchiveConfig{Enabled: true, Bucket: bucket, Endpoint: "http://"}); err == nil {
+		t.Fatal("expected invalid endpoint")
+	}
+	directoryState.Lock()
+	registry := directoryState.current
+	directoryState.Unlock()
+	return registry
+}
+
+func TestManagerRetiresPriorServiceDirectories(t *testing.T) {
+	Stop()
+	t.Cleanup(func() {
+		Stop()
+		if err := Configure("", config.LogArchiveConfig{}); err != nil {
+			t.Error(err)
+		}
+	})
+	oldDir, newDir, customDir := t.TempDir(), t.TempDir(), t.TempDir()
+	oldRegistry := configureTestRegistry(t, oldDir, "first-bucket")
+	oldCustom := RegisterDirectory(customDir)
+	oldName := "v1-responses-2026-10-13T180000-old-service.log"
+	writeFixture(t, filepath.Join(oldDir, oldName), []byte("first service backlog"))
+	writeFixture(t, filepath.Join(customDir, oldName), []byte("first service request backlog"))
+	failed := &recordingUploader{fail: true}
+	oldWorker := &manager{store: failed, directories: oldRegistry.registeredDirectories, registry: oldRegistry}
+	if err := oldWorker.scan(context.Background()); err == nil {
+		t.Fatal("expected first bucket failure")
+	}
+	Stop()
+	newRegistry := configureTestRegistry(t, newDir, "second-bucket")
+	// A late failure callback from the old service retains its old ownership token.
+	latePath := filepath.Join(customDir, ".request-log-late.pending")
+	writeFixture(t, latePath, []byte("late first service data"))
+	oldCustom.Recover(latePath)
+	newName := "v1-responses-2026-10-13T180000-new-service.log"
+	writeFixture(t, filepath.Join(newDir, newName), []byte("second service log"))
+	secondBucket := &recordingUploader{}
+	newWorker := &manager{store: secondBucket, directories: newRegistry.registeredDirectories, registry: newRegistry}
+	if err := newWorker.scan(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(secondBucket.uploads) != 1 {
+		t.Fatalf("second bucket received %d logs", len(secondBucket.uploads))
+	}
+	for key := range secondBucket.uploads {
+		if !strings.HasSuffix(key, "/"+newName+".gz") {
+			t.Fatalf("old service data sent to new bucket: %s", key)
+		}
+	}
+	for _, path := range []string{filepath.Join(oldDir, oldName), filepath.Join(customDir, oldName), latePath} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("old service artifact touched: %s: %v", path, err)
+		}
+	}
+}
+
+func TestManagerDirectoryChangeScopesRegistrations(t *testing.T) {
+	Stop()
+	t.Cleanup(func() {
+		Stop()
+		if err := Configure("", config.LogArchiveConfig{}); err != nil {
+			t.Error(err)
+		}
+	})
+	firstRoot, secondRoot, requestDir := t.TempDir(), t.TempDir(), t.TempDir()
+	first := configureTestRegistry(t, firstRoot, "first-bucket")
+	registration := RegisterDirectory(requestDir)
+	reloaded := configureTestRegistry(t, firstRoot, "first-bucket")
+	if first != reloaded || len(reloaded.registeredDirectories()) != 2 {
+		t.Fatal("same-root reload lost service registrations")
+	}
+	second := configureTestRegistry(t, secondRoot, "second-bucket")
+	if first == second {
+		t.Fatal("root change retained old registry")
+	}
+	oldPending := filepath.Join(requestDir, ".request-log-retired.pending")
+	writeFixture(t, oldPending, []byte("old request"))
+	registration.Recover(oldPending)
+	dirs := second.registeredDirectories()
+	if len(dirs) != 1 || dirs[0] != secondRoot {
+		t.Fatalf("new worker inherited old directories: %v", dirs)
+	}
+}
+
+func TestManagerRecoversQueuedPublicationFailureWithoutRestart(t *testing.T) {
+	dir := t.TempDir()
+	registration := RegisterDirectory(dir)
+	active := filepath.Join(dir, ".request-log-active.pending")
+	failed := filepath.Join(dir, ".request-log-failed.pending")
+	writeFixture(t, active, []byte("still writing"))
+	original := []byte("completed request and response after failed publication")
+	writeFixture(t, failed, original)
+	// Model a failed final publication, then explicitly hand ownership of the
+	// closed staging file to recovery without resnapshotting the directory.
+	if err := os.Rename(failed, filepath.Join(dir, strings.Repeat("x", 300)+".log")); err == nil {
+		t.Fatal("expected publication failure")
+	}
+	registration.Recover(failed)
+	uploader := &recordingUploader{}
+	worker := testWorker(dir, uploader)
+	if err := worker.scan(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(uploader.uploads) != 1 {
+		t.Fatalf("uploaded %d artifacts", len(uploader.uploads))
+	}
+	for key, raw := range uploader.uploads {
+		if !strings.Contains(key, "/recovered-") {
+			t.Fatalf("unexpected recovery key: %s", key)
+		}
+		reader, err := gzip.NewReader(bytes.NewReader(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		restored, err := io.ReadAll(reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := reader.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(restored, original) {
+			t.Fatal("recovery lost pending contents")
+		}
+	}
+	if _, err := os.Stat(failed); !os.IsNotExist(err) {
+		t.Fatalf("queued artifact not archived: %v", err)
+	}
+	if raw, err := os.ReadFile(active); err != nil || string(raw) != "still writing" {
+		t.Fatalf("active artifact touched: %v", err)
+	}
+}
+
+func TestManagerReplacingRegistryDoesNotResnapshotLiveArtifacts(t *testing.T) {
+	Stop()
+	t.Cleanup(func() {
+		Stop()
+		if err := Configure("", config.LogArchiveConfig{}); err != nil {
+			t.Error(err)
+		}
+	})
+	firstRoot, otherRoot := t.TempDir(), t.TempDir()
+	configureTestRegistry(t, firstRoot, "first-bucket")
+	live := filepath.Join(firstRoot, ".request-log-live.pending")
+	writeFixture(t, live, []byte("live first-service request"))
+	configureTestRegistry(t, otherRoot, "second-bucket")
+	replacement := configureTestRegistry(t, firstRoot, "third-bucket")
+	uploader := &recordingUploader{}
+	worker := &manager{store: uploader, directories: replacement.registeredDirectories, registry: replacement}
+	if err := worker.scan(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(uploader.uploads) != 0 {
+		t.Fatal("new registry reclassified a live pending file")
+	}
+	if raw, err := os.ReadFile(live); err != nil || string(raw) != "live first-service request" {
+		t.Fatalf("live file changed: %v", err)
 	}
 }

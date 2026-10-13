@@ -30,6 +30,7 @@ type verifiedUploader interface {
 type manager struct {
 	store       verifiedUploader
 	directories func() []string
+	registry    *directoryRegistry
 }
 
 var lifecycle struct {
@@ -47,27 +48,114 @@ func RetentionGuard() (release func(), allowed bool) {
 	return retentionGate.RUnlock, !Enabled()
 }
 
-var directories = struct {
+type directoryRegistry struct {
+	sync.Mutex
+	root  string
+	paths map[string][]string
+}
+
+// Initial snapshots are process-wide discovery metadata, not worker registrations.
+// Reusing a directory after reload/Stop must never reclassify live process files.
+var initialSnapshots = struct {
 	sync.Mutex
 	paths map[string][]string
 }{paths: make(map[string][]string)}
 
+var directoryState = struct {
+	sync.Mutex
+	current *directoryRegistry
+}{current: newDirectoryRegistry()}
+
+func newDirectoryRegistry() *directoryRegistry {
+	return &directoryRegistry{paths: make(map[string][]string)}
+}
+
+// Directory ties a request logger's recovery work to its originating service.
+// A late completion from a retired service cannot register files in its successor.
+type Directory struct {
+	registry *directoryRegistry
+	path     string
+}
+
 // Enabled reports whether local logs must be preserved for archival.
 func Enabled() bool { return enabled.Load() }
 
-// RegisterDirectory includes request logs stored outside the application log directory.
-func RegisterDirectory(dir string) {
+// RegisterDirectory includes an explicitly owned request directory in this service.
+// Call before creating any request files so the initial orphan snapshot is safe.
+func RegisterDirectory(dir string) *Directory {
 	absolute, err := filepath.Abs(dir)
 	if err != nil {
+		return nil
+	}
+	directoryState.Lock()
+	defer directoryState.Unlock()
+	registry := directoryState.current
+	registry.register(absolute)
+	return &Directory{registry: registry, path: absolute}
+}
+
+func (r *directoryRegistry) register(dir string) {
+	r.Lock()
+	defer r.Unlock()
+	if _, exists := r.paths[dir]; !exists {
+		initialSnapshots.Lock()
+		snapshot, seen := initialSnapshots.paths[dir]
+		if !seen {
+			snapshot = orphanedFiles(dir)
+			initialSnapshots.paths[dir] = snapshot
+		}
+		r.paths[dir] = append([]string(nil), snapshot...)
+		initialSnapshots.Unlock()
+	}
+}
+
+// Recover queues closed artifacts from a failed request for the next scan.
+// It must never be called while a producer can still write to these files.
+func (d *Directory) Recover(paths ...string) {
+	if d == nil {
 		return
 	}
-	directories.Lock()
-	if _, exists := directories.paths[absolute]; !exists {
-		// Registration precedes creation of any per-request files. Snapshot only
-		// once, so enabling archival on reload cannot mistake live files for debris.
-		directories.paths[absolute] = orphanedFiles(absolute)
+	d.registry.Lock()
+	defer d.registry.Unlock()
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+		absolute, err := filepath.Abs(path)
+		if err != nil {
+			continue
+		}
+		relative, err := filepath.Rel(d.path, absolute)
+		if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			continue
+		}
+		d.registry.paths[d.path] = append(d.registry.paths[d.path], absolute)
 	}
-	directories.Unlock()
+}
+
+func configureDirectories(dir string) *directoryRegistry {
+	absolute := ""
+	if dir != "" {
+		absolute, _ = filepath.Abs(dir)
+	}
+	directoryState.Lock()
+	defer directoryState.Unlock()
+	registry := directoryState.current
+	if registry.root != "" && registry.root != absolute {
+		registry = newDirectoryRegistry()
+		directoryState.current = registry
+	}
+	registry.root = absolute
+	if absolute != "" {
+		registry.register(absolute)
+	}
+	return registry
+}
+
+func retireDirectories() {
+	directoryState.Lock()
+	directoryState.current = newDirectoryRegistry()
+	directoryState.Unlock()
 }
 
 func orphanedFiles(dir string) []string {
@@ -96,10 +184,13 @@ func orphanedFiles(dir string) []string {
 	return paths
 }
 
-func recoverOrphans(dir string) error {
-	directories.Lock()
-	defer directories.Unlock()
-	pending := directories.paths[dir]
+func (r *directoryRegistry) recoverOrphans(dir string) error {
+	r.Lock()
+	defer r.Unlock()
+	pending, exists := r.paths[dir]
+	if !exists {
+		return nil
+	}
 	var failures []error
 	var remaining []string
 	for _, source := range pending {
@@ -117,15 +208,15 @@ func recoverOrphans(dir string) error {
 			_ = os.Remove(parent)
 		}
 	}
-	directories.paths[dir] = remaining
+	r.paths[dir] = remaining
 	return errors.Join(failures...)
 }
 
-func registeredDirectories() []string {
-	directories.Lock()
-	defer directories.Unlock()
-	result := make([]string, 0, len(directories.paths))
-	for dir := range directories.paths {
+func (r *directoryRegistry) registeredDirectories() []string {
+	r.Lock()
+	defer r.Unlock()
+	result := make([]string, 0, len(r.paths))
+	for dir := range r.paths {
 		result = append(result, dir)
 	}
 	return result
@@ -140,6 +231,7 @@ func Configure(dir string, cfg config.LogArchiveConfig) error {
 	enabled.Store(cfg.Enabled)
 	retentionGate.Unlock()
 	stopLocked()
+	registry := configureDirectories(dir)
 	if !cfg.Enabled {
 		return nil
 	}
@@ -147,12 +239,11 @@ func Configure(dir string, cfg config.LogArchiveConfig) error {
 	if err != nil {
 		return err
 	}
-	RegisterDirectory(dir)
 	ctx, cancel := context.WithCancel(context.Background())
 	lifecycle.cancel = cancel
 	lifecycle.done = make(chan struct{})
 	done := lifecycle.done
-	worker := &manager{store: store, directories: registeredDirectories}
+	worker := &manager{store: store, directories: registry.registeredDirectories, registry: registry}
 	go func() {
 		defer close(done)
 		defer store.Close()
@@ -179,6 +270,7 @@ func Stop() {
 	lifecycle.Lock()
 	defer lifecycle.Unlock()
 	stopLocked()
+	retireDirectories()
 }
 func stopLocked() {
 	if lifecycle.cancel != nil {
@@ -196,7 +288,9 @@ func (m *manager) scan(ctx context.Context) error {
 		}
 	}
 	for _, dir := range m.directories() {
-		record(recoverOrphans(dir))
+		if m.registry != nil {
+			record(m.registry.recoverOrphans(dir))
+		}
 		folder, errOpen := os.Open(dir)
 		if os.IsNotExist(errOpen) {
 			continue

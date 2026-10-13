@@ -2,10 +2,17 @@ package logging
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -160,5 +167,181 @@ func TestArchivePublishesBeforeHomeForwarding(t *testing.T) {
 				t.Fatal("Home forwarding skipped")
 			}
 		})
+	}
+}
+
+func TestDisabledArchiveFailedPublicationCleansStaging(t *testing.T) {
+	if err := logarchive.Configure("", config.LogArchiveConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, streaming := range []bool{false, true} {
+		name := "nonstreaming"
+		if streaming {
+			name = "streaming"
+		}
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			logger := NewFileRequestLogger(true, dir, "", 10)
+			source, err := logger.NewFileBodySource("detail")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := source.AppendPart([]byte("detail payload")); err != nil {
+				t.Fatal(err)
+			}
+			if streaming {
+				writer, err := logger.LogStreamingRequest("/v1/responses", "POST", nil, []byte("request"), strings.Repeat("x", 300))
+				if err != nil {
+					t.Fatal(err)
+				}
+				fileWriter := writer.(*FileStreamingLogWriter)
+				fileWriter.apiRequestSource = source
+				writer.WriteChunkAsync([]byte("response"))
+				if err := writer.Close(); err == nil {
+					t.Fatal("expected publication failure")
+				}
+			} else {
+				err = logger.LogRequestWithOptionsAndAllSources("/v1/responses", "POST", nil, []byte("request"), 200, nil, []byte("response"), nil, nil, nil, source, nil, nil, nil, nil, nil, false, strings.Repeat("x", 300), time.Now(), time.Time{})
+				if err == nil {
+					t.Fatal("expected publication failure")
+				}
+			}
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 0 {
+				t.Fatalf("disabled archival leaked staging files: %v", entries)
+			}
+		})
+	}
+}
+
+func TestArchiveFailedPublicationUploadsWithoutRestart(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		name := "nonstreaming"
+		if streaming {
+			name = "streaming"
+		}
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			invalid := config.LogArchiveConfig{Enabled: true}
+			if err := logarchive.Configure(dir, invalid); err == nil {
+				t.Fatal("expected invalid bucket")
+			}
+			t.Cleanup(func() {
+				logarchive.Stop()
+				if err := logarchive.Configure("", config.LogArchiveConfig{}); err != nil {
+					t.Error(err)
+				}
+			})
+			logger := NewFileRequestLogger(true, dir, "", 10)
+			marker := []byte("full response recovered in the same service session")
+			if streaming {
+				writer, err := logger.LogStreamingRequest("/v1/responses", "POST", nil, []byte("request body"), strings.Repeat("x", 300))
+				if err != nil {
+					t.Fatal(err)
+				}
+				writer.WriteChunkAsync(marker)
+				if err := writer.Close(); err == nil {
+					t.Fatal("expected final publication failure")
+				}
+			} else {
+				if err := logger.LogRequest("/v1/responses", "POST", nil, []byte("request body"), 200, nil, marker, nil, nil, nil, nil, nil, strings.Repeat("x", 300), time.Now(), time.Time{}); err == nil {
+					t.Fatal("expected final publication failure")
+				}
+			}
+			var mu sync.Mutex
+			objects := map[string][]byte{}
+			verifiedDownload := make(chan struct{}, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				defer mu.Unlock()
+				w.Header().Set("ETag", `"test-etag"`)
+				switch r.Method {
+				case http.MethodPut:
+					var body io.Reader = r.Body
+					if strings.Contains(r.Header.Get("X-Amz-Content-Sha256"), "STREAMING-AWS4-HMAC-SHA256") {
+						body = httputil.NewChunkedReader(body)
+					}
+					raw, err := io.ReadAll(body)
+					if err != nil {
+						t.Error(err)
+						w.WriteHeader(500)
+						return
+					}
+					objects[r.URL.Path] = raw
+				case http.MethodHead, http.MethodGet:
+					raw, ok := objects[r.URL.Path]
+					if !ok {
+						http.NotFound(w, r)
+						return
+					}
+					w.Header().Set("Content-Length", strconv.Itoa(len(raw)))
+					w.Header().Set("Last-Modified", "Mon, 02 Jan 2006 15:04:05 GMT")
+					if r.Method == http.MethodGet {
+						if _, err := w.Write(raw); err != nil {
+							t.Error(err)
+							return
+						}
+						reader, err := gzip.NewReader(bytes.NewReader(raw))
+						if err != nil {
+							t.Error(err)
+							return
+						}
+						restored, err := io.ReadAll(reader)
+						if err != nil {
+							t.Error(err)
+						}
+						if err := reader.Close(); err != nil {
+							t.Error(err)
+						}
+						if bytes.Contains(restored, marker) && bytes.Contains(restored, []byte("=== REQUEST INFO ===")) {
+							select {
+							case verifiedDownload <- struct{}{}:
+							default:
+							}
+						}
+					}
+				default:
+					t.Errorf("unexpected S3 method %s", r.Method)
+					w.WriteHeader(400)
+				}
+			}))
+			t.Cleanup(server.Close)
+			t.Cleanup(logarchive.Stop)
+			cfg := config.LogArchiveConfig{Enabled: true, Endpoint: server.URL, Bucket: "archive-test", Region: "us-east-1", AccessKeyID: "test-access", SecretAccessKey: "test-secret", PathStyle: true}
+			// Reconfigure the same service after its destination becomes usable. Its
+			// initial scan must consume explicitly queued failures, without a restart.
+			if err := logarchive.Configure(dir, cfg); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-verifiedDownload:
+			case <-time.After(10 * time.Second):
+				t.Fatal("closed failed request log was not uploaded for verification")
+			}
+		})
+	}
+}
+
+func TestFileBodySourceCreatedAfterRetirementKeepsLoggerOwner(t *testing.T) {
+	logarchive.Stop()
+	t.Cleanup(func() {
+		logarchive.Stop()
+		if err := logarchive.Configure("", config.LogArchiveConfig{}); err != nil {
+			t.Error(err)
+		}
+	})
+	oldLogger := NewFileRequestLogger(true, t.TempDir(), "", 10)
+	originalOwner := oldLogger.archiveDirectory
+	logarchive.Stop()
+	newLogger := NewFileRequestLogger(true, t.TempDir(), "", 10)
+	source, err := oldLogger.NewFileBodySource("late-source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if source.archiveDirectory != originalOwner || source.archiveDirectory == newLogger.archiveDirectory {
+		t.Fatal("late old-service source acquired new-service ownership")
 	}
 }

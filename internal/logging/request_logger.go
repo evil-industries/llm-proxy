@@ -144,7 +144,8 @@ type FileRequestLogger struct {
 	// errorLogsMaxFiles limits the number of error log files retained.
 	errorLogsMaxFiles int
 
-	homeEnabled bool
+	homeEnabled      bool
+	archiveDirectory *logarchive.Directory
 }
 
 // NewFileRequestLogger creates a new file-based request logger.
@@ -166,12 +167,13 @@ func NewFileRequestLogger(enabled bool, logsDir string, configDir string, errorL
 			logsDir = filepath.Join(configDir, logsDir)
 		}
 	}
-	logarchive.RegisterDirectory(logsDir)
+	archiveDirectory := logarchive.RegisterDirectory(logsDir)
 	return &FileRequestLogger{
 		enabled:           enabled,
 		logsDir:           logsDir,
 		errorLogsMaxFiles: errorLogsMaxFiles,
 		homeEnabled:       false,
+		archiveDirectory:  archiveDirectory,
 	}
 }
 
@@ -205,5 +207,5 @@ func (l *FileRequestLogger) NewFileBodySource(prefix string) (*FileBodySource, e
 	if errEnsure := l.ensureLogsDir(); errEnsure != nil {
 		return nil, errEnsure
 	}
-	return NewFileBodySourceInDir(l.logsDir, prefix)
+	return newFileBodySourceInDir(l.logsDir, prefix, l.archiveDirectory)
 }
