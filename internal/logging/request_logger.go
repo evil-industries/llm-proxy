@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/logarchive"
 )
 
 const (
@@ -165,6 +166,7 @@ func NewFileRequestLogger(enabled bool, logsDir string, configDir string, errorL
 			logsDir = filepath.Join(configDir, logsDir)
 		}
 	}
+	logarchive.RegisterDirectory(logsDir)
 	return &FileRequestLogger{
 		enabled:           enabled,
 		logsDir:           logsDir,

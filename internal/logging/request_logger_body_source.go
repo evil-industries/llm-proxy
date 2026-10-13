@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/logarchive"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -29,6 +30,7 @@ func NewFileBodySourceInDir(baseDir string, prefix string) (*FileBodySource, err
 	if errMkdir := os.MkdirAll(baseDir, 0755); errMkdir != nil {
 		return nil, errMkdir
 	}
+	logarchive.RegisterDirectory(baseDir)
 	dir, errCreate := os.MkdirTemp(baseDir, "request-log-parts-"+prefix+"-*")
 	if errCreate != nil {
 		return nil, errCreate

@@ -366,3 +366,38 @@ it('rejects malformed device challenges and request-log pages', async () => {
     createSessionManagementClient(invalidPage).getRequestLogPreview('a.log')
   ).rejects.toMatchObject({ code: 'invalid-response' });
 });
+
+it('validates archive listing entries and encodes opaque continuation cursors', async () => {
+  const files = [
+    {
+      source: 's3',
+      key: 'logs/request abc.log.gz',
+      name: 'request abc.log.gz',
+      size: 1024,
+      modified: 1,
+      kind: 'request'
+    }
+  ];
+  const { client, fetcher } = fixture({ files, next_cursor: 'next-page' });
+  expect(await client.listLogArchives({ cursor: 'a+b/c=', limit: 100 })).toEqual({
+    files,
+    next_cursor: 'next-page'
+  });
+  const url = new URL(String(fetcher.mock.calls[0][0]));
+  expect(url.searchParams.get('cursor')).toBe('a+b/c=');
+  expect(url.searchParams.get('limit')).toBe('100');
+  expect(() => client.getLogArchiveDownloadURL({ source: 's3', key: files[0].key })).toThrow(
+    'signed-in management console'
+  );
+});
+
+it.each([
+  { source: 'external', key: 'a.log.gz', name: 'a.log.gz', size: 1, modified: 1 },
+  { source: 's3', key: '../secret', name: 'a.log.gz', size: 1, modified: 1 },
+  { source: 'local', key: 'a/b.log', name: 'b.log', size: 1, modified: 1 },
+  { source: 's3', key: 'a.log.gz', name: 'a.log.gz', size: -1, modified: 1 },
+  { source: 's3', key: 'a.log.gz', name: 'a.log.gz', size: 1, modified: 'yesterday' }
+])('rejects invalid archive entries without exposing response data', async (file) => {
+  const { client } = fixture({ files: [file], next_cursor: '' });
+  await expect(client.listLogArchives()).rejects.toMatchObject({ code: 'invalid-response' });
+});

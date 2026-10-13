@@ -112,6 +112,20 @@ export function validManagementResponse(path: string, value: unknown): boolean {
   switch (pathname) {
     case '/codex/device-auth':
       return validCodexDeviceAuth(value);
+    case '/log-archives':
+      return (
+        object(value) &&
+        fields(value, ['next_cursor'], string) &&
+        array(
+          (file) =>
+            object(file) &&
+            validArchiveKey(file.source, file.key) &&
+            string(file.name) &&
+            count(file.size) &&
+            count(file.modified) &&
+            fields(file, ['kind'], string)
+        )(value.files)
+      );
     case '/request-logs':
       return (
         object(value) &&
@@ -213,4 +227,18 @@ export function validCodexDeviceAuth(value: unknown): boolean {
       (value.interval as number) >= 1
     );
   return true;
+}
+
+/** Archive keys are opaque object identifiers, never filesystem traversal paths. */
+export function validArchiveKey(source: unknown, key: unknown): boolean {
+  if (
+    (source !== 'local' && source !== 's3') ||
+    typeof key !== 'string' ||
+    !key ||
+    /[\\\x00-\x1f\x7f]/.test(key)
+  )
+    return false;
+  const parts = key.split('/');
+  if (parts.some((part) => !part || part === '.' || part === '..')) return false;
+  return source !== 'local' || parts.length === 1;
 }

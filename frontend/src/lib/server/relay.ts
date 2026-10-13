@@ -1,3 +1,4 @@
+import { validArchiveKey } from '../api/validation';
 import type { ServerConfiguration } from './config';
 import { sameOrigin } from './auth';
 import { managementFetch } from './management-fetch';
@@ -10,6 +11,8 @@ const METHODS: Record<string, readonly string[]> = {
   'api-keys/mutate': ['POST'],
   logs: ['GET'],
   'request-logs': ['GET'],
+  'log-archives': ['GET'],
+  'log-archives/download': ['GET'],
   notifications: ['GET', 'PUT'],
   'notifications/test': ['POST'],
   'routing/strategy': ['GET', 'PUT'],
@@ -80,17 +83,27 @@ function validQuery(path: string, method: string, params: URLSearchParams): bool
     ? file.download
       ? []
       : ['offset', 'limit']
-    : path === 'logs'
-      ? ['limit', 'cursor', 'after']
-      : path === 'auth-files' && method === 'GET'
-        ? ['name', 'auth_index']
-        : path === 'auth-files' && method === 'DELETE'
-          ? ['name']
-          : path === 'api-keys' && method === 'DELETE'
-            ? ['index']
-            : [];
+    : path === 'log-archives'
+      ? ['limit', 'cursor']
+      : path === 'log-archives/download'
+        ? ['source', 'key']
+        : path === 'logs'
+          ? ['limit', 'cursor', 'after']
+          : path === 'auth-files' && method === 'GET'
+            ? ['name', 'auth_index']
+            : path === 'auth-files' && method === 'DELETE'
+              ? ['name']
+              : path === 'api-keys' && method === 'DELETE'
+                ? ['index']
+                : [];
   if ([...params.keys()].some((key) => !allowed.includes(key) || params.getAll(key).length !== 1))
     return false;
+  if (path === 'log-archives/download')
+    return validArchiveKey(params.get('source'), params.get('key'));
+  if (path === 'log-archives' && params.has('limit')) {
+    const limit = params.get('limit')!;
+    if (!/^\d+$/.test(limit) || Number(limit) < 1 || Number(limit) > 1000) return false;
+  }
   if (method === 'DELETE' && path === 'auth-files') return Boolean(params.get('name'));
   if (method === 'DELETE' && path === 'api-keys') return /^\d+$/.test(params.get('index') ?? '');
   return true;
@@ -155,10 +168,10 @@ export async function relayManagement(
           : upstream.status;
       return safeJSON({ error: 'The proxy server could not complete this request.' }, status);
     }
-    if (file?.download) {
-      const name = path.split('/')[1];
+    if (file?.download || path === 'log-archives/download') {
+      const name = file ? path.split('/')[1] : url.searchParams.get('key')!.split('/').at(-1)!;
       const responseHeaders = new Headers({
-        'Content-Type': 'text/plain; charset=utf-8',
+        'Content-Type': name.endsWith('.gz') ? 'application/gzip' : 'text/plain; charset=utf-8',
         'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
         'Cache-Control': 'no-store',
         'X-Content-Type-Options': 'nosniff'

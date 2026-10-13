@@ -9,6 +9,8 @@ import (
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/api"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/home"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/logarchive"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/redisqueue"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v7/sdk/access"
@@ -64,6 +66,12 @@ func (s *Service) Run(ctx context.Context) error {
 			log.Errorf("service shutdown returned error: %v", err)
 		}
 	}()
+
+	if s.cfg != nil && s.cfg.LogArchive.Enabled {
+		if errConfigure := logging.ConfigureLogOutput(s.cfg); errConfigure != nil {
+			return fmt.Errorf("cliproxy: configure log archival: %w", errConfigure)
+		}
+	}
 
 	if !homeEnabled {
 		if errEnsureAuthDir := s.ensureAuthDir(); errEnsureAuthDir != nil {
@@ -356,6 +364,7 @@ func (s *Service) Shutdown(ctx context.Context) error {
 			}
 		}
 
+		logarchive.Stop()
 		usage.StopDefault()
 	})
 	return shutdownErr

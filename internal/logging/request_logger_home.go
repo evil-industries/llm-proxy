@@ -72,7 +72,8 @@ func (l *FileRequestLogger) forwardRequestLogToHome(ctx context.Context, headers
 }
 
 // SetHomeEnabled toggles home request-log forwarding.
-// When enabled, request logs are not written to disk and are instead forwarded to home via Redis RESP.
+// Logs are forwarded via Redis RESP. With archival enabled, a local copy is
+// published first so Home availability cannot prevent S3 archival.
 func (l *FileRequestLogger) SetHomeEnabled(enabled bool) {
 	if l == nil {
 		return

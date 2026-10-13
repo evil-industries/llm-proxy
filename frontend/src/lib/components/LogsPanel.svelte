@@ -1,4 +1,5 @@
 <script lang="ts">
+  import LogArchivesPanel from './LogArchivesPanel.svelte';
   import { formatDateTime, formatTime } from '$lib/datetime';
   import { correlateLogs, logPresentation } from '$lib/logs';
   import { onMount, untrack } from 'svelte';
@@ -368,7 +369,7 @@
       <Tabs.List variant="line" class="log-tabs max-w-full"
         ><Tabs.Trigger value="server">Server logs</Tabs.Trigger><Tabs.Trigger value="requests"
           >Request logs</Tabs.Trigger
-        ></Tabs.List
+        ><Tabs.Trigger value="archives">Downloads</Tabs.Trigger></Tabs.List
       >
       {#if tab === 'server'}
         <div class="log-controls">
@@ -727,6 +728,9 @@
             </div>{/if}
         </div>
       {/if}
+    </Tabs.Content>
+    <Tabs.Content value="archives" class="min-w-0 min-h-0 flex flex-col">
+      {#if tab === 'archives'}<LogArchivesPanel {client} {disabled} />{/if}
     </Tabs.Content>
   </Tabs.Root>
 </section>

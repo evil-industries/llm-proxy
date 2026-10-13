@@ -167,6 +167,9 @@ func (s *Service) stageHomeOverlayWithClient(ctx context.Context, remoteCfg *con
 	merged.Port = baseCfg.Port
 	merged.TLS = baseCfg.TLS
 	merged.Home = baseCfg.Home
+	// Archive destinations and credentials belong to the node's storage setup.
+	// An older Home configuration must not turn off preservation implicitly.
+	merged.LogArchive = baseCfg.LogArchive
 	storeAuth := merged.Plugins.StoreAuth
 	forceHomeRuntimeConfig(&merged)
 	syncCfg := merged

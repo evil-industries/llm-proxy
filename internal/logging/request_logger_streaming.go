@@ -2,11 +2,13 @@ package logging
 
 import (
 	"bytes"
+	"context"
 	"fmt"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementevents"
 	"os"
+	"path/filepath"
 	"time"
 
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementevents"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -16,6 +18,9 @@ import (
 type FileStreamingLogWriter struct {
 	// logFilePath is the final log file path.
 	logFilePath string
+	preserve    bool
+	homeEnabled bool
+	requestID   string
 
 	// url is the request URL (masked upstream in middleware).
 	url string
@@ -88,6 +93,11 @@ func (w *FileStreamingLogWriter) WriteChunkAsync(chunk []byte) {
 	chunkCopy := make([]byte, len(chunk))
 	copy(chunkCopy, chunk)
 
+	// Archival must retain every captured chunk, applying disk backpressure.
+	if w.preserve {
+		w.chunkChan <- chunkCopy
+		return
+	}
 	// Non-blocking send
 	select {
 	case w.chunkChan <- chunkCopy:
@@ -210,7 +220,9 @@ func (w *FileStreamingLogWriter) Close() error {
 
 	select {
 	case errWrite := <-w.errorChan:
-		w.cleanupTempFiles()
+		if !w.preserve {
+			w.cleanupTempFiles()
+		}
 		return errWrite
 	default:
 	}
@@ -220,13 +232,18 @@ func (w *FileStreamingLogWriter) Close() error {
 		return nil
 	}
 
-	logFile, errOpen := os.OpenFile(w.logFilePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	logFile, errOpen := os.CreateTemp(filepath.Dir(w.logFilePath), ".request-log-*.pending")
 	if errOpen != nil {
-		w.cleanupTempFiles()
+		if !w.preserve {
+			w.cleanupTempFiles()
+		}
 		return fmt.Errorf("failed to create log file: %w", errOpen)
 	}
 
 	writeErr := w.writeFinalLog(logFile)
+	if writeErr == nil {
+		writeErr = logFile.Sync()
+	}
 	defer managementevents.Publish(managementevents.RequestLogs)
 	if errClose := logFile.Close(); errClose != nil {
 		log.WithError(errClose).Warn("failed to close request log file")
@@ -235,8 +252,31 @@ func (w *FileStreamingLogWriter) Close() error {
 		}
 	}
 
+	if writeErr != nil {
+		if !w.preserve {
+			w.cleanupTempFiles()
+		}
+		return writeErr
+	}
+	var homeText []byte
+	if w.homeEnabled {
+		var errRead error
+		homeText, errRead = os.ReadFile(logFile.Name())
+		if errRead != nil {
+			log.Warn("failed to read request log for home; local archive preserved")
+		}
+	}
+	if errRename := os.Rename(logFile.Name(), w.logFilePath); errRename != nil {
+		return fmt.Errorf("failed to publish request log: %w", errRename)
+	}
+	if homeText != nil {
+		logger := &FileRequestLogger{homeEnabled: true}
+		if errHome := logger.forwardRequestLogToHome(context.Background(), w.requestHeaders, w.requestID, string(homeText)); errHome != nil {
+			log.Warn("failed to forward request log to home; local archive preserved")
+		}
+	}
 	w.cleanupTempFiles()
-	return writeErr
+	return nil
 }
 
 // asyncWriter runs in a goroutine to buffer chunks from the channel.

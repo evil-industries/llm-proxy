@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/logarchive"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
 )
 
@@ -144,6 +145,12 @@ func (h *Handler) DeleteLogs(c *gin.Context) {
 	}
 	if cfg == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "configuration unavailable"})
+		return
+	}
+	releaseRetention, retentionAllowed := logarchive.RetentionGuard()
+	defer releaseRetention()
+	if cfg.LogArchive.Enabled || !retentionAllowed {
+		c.JSON(http.StatusConflict, gin.H{"error": "logs cannot be deleted while permanent log archival is enabled"})
 		return
 	}
 	if !cfg.LoggingToFile {

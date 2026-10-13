@@ -173,3 +173,22 @@ export interface RequestLogPreview {
   modified: number;
   has_more: boolean;
 }
+
+export interface LogArchiveFile {
+  source: 'local' | 's3';
+  key: string;
+  name: string;
+  size: number;
+  modified: number;
+  kind?: string;
+}
+
+export interface LogArchivesResponse {
+  files: LogArchiveFile[];
+  next_cursor?: string;
+}
+
+export interface LogArchivesQuery {
+  cursor?: string;
+  limit?: number;
+}

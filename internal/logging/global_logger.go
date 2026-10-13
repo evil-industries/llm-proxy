@@ -3,7 +3,6 @@ package logging
 import (
 	"bytes"
 	"fmt"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementevents"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,6 +12,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/logarchive"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementevents"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -219,6 +220,10 @@ func ConfigureLogOutput(cfg *config.Config) error {
 		log.SetOutput(os.Stdout)
 	}
 
+	stopLogDirCleanerLocked()
+	if errArchive := logarchive.Configure(logDir, cfg.LogArchive); errArchive != nil {
+		return fmt.Errorf("logging: configure archive: %w", errArchive)
+	}
 	configureLogDirCleanerLocked(logDir, cfg.LogsMaxTotalSizeMB, protectedPath)
 	return nil
 }
@@ -228,6 +233,7 @@ func closeLogOutputs() {
 	defer writerMu.Unlock()
 
 	stopLogDirCleanerLocked()
+	logarchive.Stop()
 
 	if logWriter != nil {
 		_ = logWriter.Close()

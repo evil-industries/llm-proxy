@@ -8,17 +8,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/logarchive"
 	log "github.com/sirupsen/logrus"
 )
 
 const logDirCleanerInterval = time.Minute
 
 var logDirCleanerCancel context.CancelFunc
+var logDirCleanerDone chan struct{}
 
 func configureLogDirCleanerLocked(logDir string, maxTotalSizeMB int, protectedPath string) {
 	stopLogDirCleanerLocked()
 
-	if maxTotalSizeMB <= 0 {
+	if logarchive.Enabled() || maxTotalSizeMB <= 0 {
 		return
 	}
 
@@ -34,7 +36,12 @@ func configureLogDirCleanerLocked(logDir string, maxTotalSizeMB int, protectedPa
 
 	ctx, cancel := context.WithCancel(context.Background())
 	logDirCleanerCancel = cancel
-	go runLogDirCleaner(ctx, filepath.Clean(dir), maxBytes, strings.TrimSpace(protectedPath))
+	logDirCleanerDone = make(chan struct{})
+	done := logDirCleanerDone
+	go func() {
+		defer close(done)
+		runLogDirCleaner(ctx, filepath.Clean(dir), maxBytes, strings.TrimSpace(protectedPath))
+	}()
 }
 
 func stopLogDirCleanerLocked() {
@@ -42,6 +49,8 @@ func stopLogDirCleanerLocked() {
 		return
 	}
 	logDirCleanerCancel()
+	<-logDirCleanerDone
+	logDirCleanerDone = nil
 	logDirCleanerCancel = nil
 }
 
@@ -72,7 +81,9 @@ func runLogDirCleaner(ctx context.Context, logDir string, maxBytes int64, protec
 }
 
 func enforceLogDirSizeLimit(logDir string, maxBytes int64, protectedPath string) (int, error) {
-	if maxBytes <= 0 {
+	releaseRetention, allowed := logarchive.RetentionGuard()
+	defer releaseRetention()
+	if !allowed || maxBytes <= 0 {
 		return 0, nil
 	}
 
