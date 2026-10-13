@@ -2,6 +2,7 @@ package logging
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -189,7 +190,7 @@ func ResolveLogDirectory(cfg *config.Config) string {
 // ConfigureLogOutput switches the global log destination between rotating files and stdout.
 // When logsMaxTotalSizeMB > 0, a background cleaner removes the oldest log files in the logs directory
 // until the total size is within the limit.
-func ConfigureLogOutput(cfg *config.Config) error {
+func ConfigureLogOutput(cfg *config.Config) (errConfigure error) {
 	SetupBaseLogger()
 
 	writerMu.Lock()
@@ -198,6 +199,18 @@ func ConfigureLogOutput(cfg *config.Config) error {
 	logDir := ResolveLogDirectory(cfg)
 
 	protectedPath := ""
+	// A reload must stop the old destination before publishing any new segment.
+	// Keep directory ownership intact so in-flight request loggers survive reload.
+	stopLogDirCleanerLocked()
+	logarchive.Quiesce()
+	defer func() {
+		if errArchive := logarchive.Configure(logDir, cfg.LogArchive); errArchive != nil {
+			errConfigure = errors.Join(errConfigure, fmt.Errorf("logging: configure archive: %w", errArchive))
+		}
+		if errConfigure == nil {
+			configureLogDirCleanerLocked(logDir, cfg.LogsMaxTotalSizeMB, protectedPath)
+		}
+	}()
 	if cfg.LoggingToFile {
 		if err := os.MkdirAll(logDir, 0o755); err != nil {
 			return fmt.Errorf("logging: failed to create log directory: %w", err)
@@ -235,11 +248,6 @@ func ConfigureLogOutput(cfg *config.Config) error {
 		}
 	}
 
-	stopLogDirCleanerLocked()
-	if errArchive := logarchive.Configure(logDir, cfg.LogArchive); errArchive != nil {
-		return fmt.Errorf("logging: configure archive: %w", errArchive)
-	}
-	configureLogDirCleanerLocked(logDir, cfg.LogsMaxTotalSizeMB, protectedPath)
 	return nil
 }
 

@@ -264,6 +264,15 @@ func Configure(dir string, cfg config.LogArchiveConfig) error {
 	return nil
 }
 
+// Quiesce stops uploads while preserving this service's directory ownership and
+// retention guard. Configure resumes with the new destination after local writers
+// have been switched, even if publishing their last segment fails.
+func Quiesce() {
+	lifecycle.Lock()
+	defer lifecycle.Unlock()
+	stopLocked()
+}
+
 // Stop cancels network work and waits until local files are no longer touched.
 // Retention remains disabled until Configure explicitly disables archival.
 func Stop() {

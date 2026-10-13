@@ -120,10 +120,22 @@ func (l *FileRequestLogger) logRequestWithSources(url, method string, requestHea
 		if writeErr != nil {
 			return fmt.Errorf("failed to build request log content: %w", writeErr)
 		}
-		if !preserve {
-			return l.forwardRequestLogToHome(context.Background(), requestHeaders, requestID, buf.String())
-		}
 		homeText = buf.String()
+		preserve = preserve || logarchive.Enabled()
+		if !preserve {
+			errHome := l.forwardRequestLogToHome(context.Background(), requestHeaders, requestID, homeText)
+			homeText = "" // This record was already forwarded or attempted.
+			// Home assembly/forwarding can overlap an archival config reload.
+			// Keep all original payloads and sources until the local copy is published.
+			preserve = preserve || logarchive.Enabled()
+			if !preserve {
+				completed = errHome == nil
+				return errHome
+			}
+			if errHome != nil {
+				log.Warn("failed to forward request log to home; preserving local archive")
+			}
+		}
 	}
 
 	// Ensure logs directory exists
