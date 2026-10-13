@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementevents"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,7 +13,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/logarchive"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementevents"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -63,9 +65,25 @@ func (l *FileRequestLogger) LogRequestWithOptionsAndAllSources(url, method strin
 }
 
 func (l *FileRequestLogger) logRequestWithSources(url, method string, requestHeaders map[string][]string, body []byte, statusCode int, responseHeaders map[string][]string, response, websocketTimeline []byte, websocketTimelineSource *FileBodySource, apiRequest []byte, apiRequestSource *FileBodySource, apiResponse []byte, apiResponseSource *FileBodySource, apiWebsocketTimeline []byte, apiWebsocketTimelineSource *FileBodySource, apiResponseErrors []*interfaces.ErrorMessage, force bool, requestID string, requestTimestamp, apiResponseTimestamp time.Time) error {
-	defer cleanupFileBodySources(websocketTimelineSource, apiRequestSource, apiResponseSource, apiWebsocketTimelineSource)
+	preserve := logarchive.Enabled()
+	completed := false
+	var pendingPath, requestBodyPath string
+	defer func() {
+		if (preserve || logarchive.Enabled()) && !completed {
+			l.archiveDirectory.Recover(pendingPath, requestBodyPath)
+			recoverFileBodySources(websocketTimelineSource, apiRequestSource, apiResponseSource, apiWebsocketTimelineSource)
+			return
+		}
+		cleanupFileBodySources(websocketTimelineSource, apiRequestSource, apiResponseSource, apiWebsocketTimelineSource)
+		removeRequestStagingFile(requestBodyPath)
+		if !completed {
+			removeRequestStagingFile(pendingPath)
+		}
+	}()
+	var homeText string
 
 	if !l.enabled && !force {
+		completed = true
 		return nil
 	}
 
@@ -102,7 +120,22 @@ func (l *FileRequestLogger) logRequestWithSources(url, method string, requestHea
 		if writeErr != nil {
 			return fmt.Errorf("failed to build request log content: %w", writeErr)
 		}
-		return l.forwardRequestLogToHome(context.Background(), requestHeaders, requestID, buf.String())
+		homeText = buf.String()
+		preserve = preserve || logarchive.Enabled()
+		if !preserve {
+			errHome := l.forwardRequestLogToHome(context.Background(), requestHeaders, requestID, homeText)
+			homeText = "" // This record was already forwarded or attempted.
+			// Home assembly/forwarding can overlap an archival config reload.
+			// Keep all original payloads and sources until the local copy is published.
+			preserve = preserve || logarchive.Enabled()
+			if !preserve {
+				completed = errHome == nil
+				return errHome
+			}
+			if errHome != nil {
+				log.Warn("failed to forward request log to home; preserving local archive")
+			}
+		}
 	}
 
 	// Ensure logs directory exists
@@ -117,16 +150,10 @@ func (l *FileRequestLogger) logRequestWithSources(url, method string, requestHea
 	}
 	filePath := filepath.Join(l.logsDir, filename)
 
-	requestBodyPath, errTemp := l.writeRequestBodyTempFile(body)
+	var errTemp error
+	requestBodyPath, errTemp = l.writeRequestBodyTempFile(body)
 	if errTemp != nil {
 		log.WithError(errTemp).Warn("failed to create request body temp file, falling back to direct write")
-	}
-	if requestBodyPath != "" {
-		defer func() {
-			if errRemove := os.Remove(requestBodyPath); errRemove != nil {
-				log.WithError(errRemove).Warn("failed to remove request body temp file")
-			}
-		}()
 	}
 
 	responseToWrite, decompressErr := l.decompressResponse(responseHeaders, response)
@@ -135,11 +162,12 @@ func (l *FileRequestLogger) logRequestWithSources(url, method string, requestHea
 		responseToWrite = response
 	}
 
-	logFile, errOpen := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	logFile, errOpen := os.CreateTemp(l.logsDir, ".request-log-*.pending")
 	if errOpen != nil {
 		return fmt.Errorf("failed to create log file: %w", errOpen)
 	}
 
+	pendingPath = logFile.Name()
 	writeErr := l.writeNonStreamingLog(
 		logFile,
 		url,
@@ -164,6 +192,9 @@ func (l *FileRequestLogger) logRequestWithSources(url, method string, requestHea
 		apiResponseTimestamp,
 	)
 	defer managementevents.Publish(managementevents.RequestLogs)
+	if writeErr == nil {
+		writeErr = logFile.Sync()
+	}
 	if errClose := logFile.Close(); errClose != nil {
 		log.WithError(errClose).Warn("failed to close request log file")
 		if writeErr == nil {
@@ -174,6 +205,15 @@ func (l *FileRequestLogger) logRequestWithSources(url, method string, requestHea
 		return fmt.Errorf("failed to write log file: %w", writeErr)
 	}
 
+	if errRename := os.Rename(logFile.Name(), filePath); errRename != nil {
+		return fmt.Errorf("failed to publish request log: %w", errRename)
+	}
+	completed = true
+	if homeText != "" {
+		if errHome := l.forwardRequestLogToHome(context.Background(), requestHeaders, requestID, homeText); errHome != nil {
+			log.Warn("failed to forward request log to home; local archive preserved")
+		}
+	}
 	if force && !l.enabled {
 		if errCleanup := l.cleanupOldErrorLogs(); errCleanup != nil {
 			log.WithError(errCleanup).Warn("failed to clean up old error logs")
@@ -200,14 +240,14 @@ func (l *FileRequestLogger) LogStreamingRequest(url, method string, headers map[
 		return &NoOpStreamingLogWriter{}, nil
 	}
 
-	if l.homeEnabled {
+	if l.homeEnabled && !logarchive.Enabled() {
 		client := currentHomeRequestLogClient()
-		if client == nil || !client.HeartbeatOK() {
-			return &NoOpStreamingLogWriter{}, nil
-		}
-		return newHomeStreamingLogWriter(url, method, headers, body, requestID), nil
+		return newHomeStreamingLogWriter(l, client != nil && client.HeartbeatOK(), url, method, headers, body, requestID), nil
 	}
+	return l.newFileStreamingLogWriter(url, method, headers, body, requestID)
+}
 
+func (l *FileRequestLogger) newFileStreamingLogWriter(url, method string, headers map[string][]string, body []byte, requestID string) (*FileStreamingLogWriter, error) {
 	// Ensure logs directory exists
 	if err := l.ensureLogsDir(); err != nil {
 		return nil, fmt.Errorf("failed to create logs directory: %w", err)
@@ -239,6 +279,10 @@ func (l *FileRequestLogger) LogStreamingRequest(url, method string, headers map[
 	// Create streaming writer
 	writer := &FileStreamingLogWriter{
 		logFilePath:      filePath,
+		archiveDirectory: l.archiveDirectory,
+		preserve:         logarchive.Enabled(),
+		homeEnabled:      l.homeEnabled,
+		requestID:        requestID,
 		url:              url,
 		method:           method,
 		timestamp:        time.Now(),
@@ -309,7 +353,7 @@ func (l *FileRequestLogger) generateFilename(url string, requestID ...string) st
 		idPart = fmt.Sprintf("%d", id)
 	}
 
-	return fmt.Sprintf("%s-%s-%s.log", sanitized, timestamp, idPart)
+	return fmt.Sprintf("%s-%s-%s-%s.log", sanitized, timestamp, uuid.NewString(), l.sanitizeForFilename(idPart))
 }
 
 // sanitizeForFilename replaces characters that are not safe for filenames.
@@ -347,7 +391,9 @@ func (l *FileRequestLogger) sanitizeForFilename(path string) string {
 
 // cleanupOldErrorLogs keeps only the newest errorLogsMaxFiles forced error log files.
 func (l *FileRequestLogger) cleanupOldErrorLogs() error {
-	if l.errorLogsMaxFiles <= 0 {
+	releaseRetention, allowed := logarchive.RetentionGuard()
+	defer releaseRetention()
+	if !allowed || l.errorLogsMaxFiles <= 0 {
 		return nil
 	}
 
@@ -412,4 +458,13 @@ func (l *FileRequestLogger) writeRequestBodyTempFile(body []byte) (string, error
 		return "", errClose
 	}
 	return tmpPath, nil
+}
+
+func removeRequestStagingFile(path string) {
+	if path == "" {
+		return
+	}
+	if errRemove := os.Remove(path); errRemove != nil && !os.IsNotExist(errRemove) {
+		log.WithError(errRemove).Warn("failed to remove request log staging file")
+	}
 }

@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/home"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/logarchive"
 )
 
 type homeRequestLogClient interface {
@@ -72,7 +75,8 @@ func (l *FileRequestLogger) forwardRequestLogToHome(ctx context.Context, headers
 }
 
 // SetHomeEnabled toggles home request-log forwarding.
-// When enabled, request logs are not written to disk and are instead forwarded to home via Redis RESP.
+// Logs are forwarded via Redis RESP. With archival enabled, a local copy is
+// published first so Home availability cannot prevent S3 archival.
 func (l *FileRequestLogger) SetHomeEnabled(enabled bool) {
 	if l == nil {
 		return
@@ -81,6 +85,12 @@ func (l *FileRequestLogger) SetHomeEnabled(enabled bool) {
 }
 
 type homeStreamingLogWriter struct {
+	// Keep the original directory owner when archival is enabled mid-request.
+	fileLogger      FileRequestLogger
+	fileWriter      *FileStreamingLogWriter
+	captureEnabled  bool
+	preserveLatched atomic.Bool
+
 	url       string
 	method    string
 	timestamp time.Time
@@ -103,7 +113,7 @@ type homeStreamingLogWriter struct {
 	firstChunkTS     time.Time
 }
 
-func newHomeStreamingLogWriter(url, method string, headers map[string][]string, body []byte, requestID string) *homeStreamingLogWriter {
+func newHomeStreamingLogWriter(logger *FileRequestLogger, captureEnabled bool, url, method string, headers map[string][]string, body []byte, requestID string) *homeStreamingLogWriter {
 	requestHeaders := make(map[string][]string, len(headers))
 	for key, values := range headers {
 		headerValues := make([]string, len(values))
@@ -112,6 +122,8 @@ func newHomeStreamingLogWriter(url, method string, headers map[string][]string, 
 	}
 
 	writer := &homeStreamingLogWriter{
+		fileLogger:     *logger,
+		captureEnabled: captureEnabled,
 		url:            url,
 		method:         method,
 		timestamp:      time.Now(),
@@ -126,6 +138,49 @@ func newHomeStreamingLogWriter(url, method string, headers map[string][]string, 
 	return writer
 }
 
+// PreserveLogs and PreservingLogs share the request's latched policy with the
+// middleware without touching the response buffer owned by the queue consumer.
+func (w *homeStreamingLogWriter) PreserveLogs() { w.preserveLatched.Store(true) }
+
+func (w *homeStreamingLogWriter) PreservingLogs() bool {
+	if w.preserveLatched.Load() || logarchive.Enabled() {
+		w.PreserveLogs()
+		return true
+	}
+	return false
+}
+
+func (w *homeStreamingLogWriter) stopHomeChunks() {
+	if w.chunkChan != nil {
+		close(w.chunkChan)
+		<-w.doneChan
+		w.chunkChan = nil
+	}
+}
+
+// activateFileWriter is called only by the serialized chunk producer or Close
+// after that producer has stopped. Existing captured chunks move into the spool
+// before new chunks, retaining their order and the original request metadata.
+func (w *homeStreamingLogWriter) activateFileWriter() error {
+	if w.fileWriter != nil {
+		return nil
+	}
+	writer, errCreate := w.fileLogger.newFileStreamingLogWriter(w.url, w.method, w.requestHeaders, w.requestBody, w.requestID)
+	if errCreate != nil {
+		return fmt.Errorf("failed to activate request log archival: %w", errCreate)
+	}
+	writer.PreserveLogs()
+	writer.timestamp = w.timestamp
+	w.stopHomeChunks()
+	if w.responseBody.Len() > 0 {
+		writer.WriteChunkAsync(w.responseBody.Bytes())
+	}
+	w.responseBody = bytes.Buffer{}
+	w.requestBody = nil
+	w.fileWriter = writer
+	return nil
+}
+
 func (w *homeStreamingLogWriter) asyncWriter() {
 	defer close(w.doneChan)
 	for chunk := range w.chunkChan {
@@ -137,7 +192,22 @@ func (w *homeStreamingLogWriter) asyncWriter() {
 }
 
 func (w *homeStreamingLogWriter) WriteChunkAsync(chunk []byte) {
-	if w == nil || w.chunkChan == nil || len(chunk) == 0 {
+	if w == nil || len(chunk) == 0 {
+		return
+	}
+	if w.PreservingLogs() {
+		if errActivate := w.activateFileWriter(); errActivate == nil {
+			w.fileWriter.WriteChunkAsync(chunk)
+			return
+		}
+		// Keep the captured bytes for another activation attempt and surface a
+		// persistent storage failure from Close; never drop a preserved chunk.
+		if w.chunkChan != nil {
+			w.chunkChan <- bytes.Clone(chunk)
+		}
+		return
+	}
+	if !w.captureEnabled || w.chunkChan == nil {
 		return
 	}
 	select {
@@ -202,10 +272,23 @@ func (w *homeStreamingLogWriter) Close() error {
 		return nil
 	}
 
-	if w.chunkChan != nil {
-		close(w.chunkChan)
-		<-w.doneChan
-		w.chunkChan = nil
+	w.stopHomeChunks()
+	if w.PreservingLogs() {
+		if errActivate := w.activateFileWriter(); errActivate != nil {
+			return errActivate
+		}
+		writer := w.fileWriter
+		writer.responseStatus = w.responseStatus
+		writer.statusWritten = w.statusWritten
+		writer.responseHeaders = w.responseHeaders
+		writer.apiRequest = w.apiRequest
+		writer.apiResponse = w.apiResponse
+		writer.apiWebsocketTimeline = w.apiWebsocketTime
+		writer.apiResponseTimestamp = w.apiResponseTS
+		return writer.Close()
+	}
+	if !w.captureEnabled {
+		return nil
 	}
 
 	client := currentHomeRequestLogClient()

@@ -300,3 +300,89 @@ it.each(['gemini-2.5-pro(8192)', 'model%2Fvariant', 'model#variant', '模型'])(
     );
   }
 );
+
+it('streams gzip archive downloads with private upstream authentication and safe attachment headers', async () => {
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  const body = new ReadableStream<Uint8Array>({
+    start(value) {
+      controller = value;
+    }
+  });
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+    new Response(body, {
+      headers: {
+        'Content-Type': 'text/html',
+        'Set-Cookie': 'secret=value',
+        'Content-Encoding': 'gzip'
+      }
+    })
+  );
+  const key = 'logs/instance/request a+b.log.gz';
+  const path = `log-archives/download?${new URLSearchParams({ source: 's3', key })}`;
+  const response = await relayManagement(request(path), 'log-archives/download', config, fetcher);
+  expect(response.status).toBe(200);
+  expect(fetcher.mock.calls[0][0]).toBe(`${config.managementURL}/${path}`);
+  const headers = new Headers(fetcher.mock.calls[0][1]?.headers);
+  expect(headers.get('authorization')).toBe('Bearer private-secret');
+  expect(headers.get('cookie')).toBeNull();
+  expect(response.headers.get('content-type')).toBe('application/gzip');
+  expect(response.headers.get('content-disposition')).toBe(
+    "attachment; filename*=UTF-8''request%20a%2Bb.log.gz"
+  );
+  expect(response.headers.get('content-encoding')).toBeNull();
+  expect(response.headers.get('set-cookie')).toBeNull();
+  expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+  const reader = response.body!.getReader();
+  const bytes = new Uint8Array([31, 139, 8, 0]);
+  controller.enqueue(bytes);
+  expect((await reader.read()).value).toEqual(bytes);
+  controller.close();
+  expect((await reader.read()).done).toBe(true);
+});
+
+it.each([
+  'source=s3',
+  'source=unknown&key=a.log.gz',
+  'source=local&key=dir/a.log',
+  'source=s3&key=../secret',
+  'source=s3&key=prefix/../secret',
+  'source=s3&key=prefix%00secret',
+  'source=s3&key=a&key=b',
+  'source=s3&key=a&bucket=private',
+  'source=s3&key=/absolute'
+])('rejects unsafe archive download query %s', async (query) => {
+  const fetcher = upstream();
+  expect(
+    (
+      await relayManagement(
+        request(`log-archives/download?${query}`),
+        'log-archives/download',
+        config,
+        fetcher
+      )
+    ).status
+  ).toBe(400);
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+it('relays opaque archive pagination cursors and rejects out-of-bounds page sizes', async () => {
+  const fetcher = upstream();
+  const query = new URLSearchParams({ cursor: 'a+b/c=', limit: '100' });
+  expect(
+    (await relayManagement(request(`log-archives?${query}`), 'log-archives', config, fetcher))
+      .status
+  ).toBe(200);
+  expect(fetcher.mock.calls[0][0]).toBe(`${config.managementURL}/log-archives?${query}`);
+  for (const limit of ['0', '-1', '1001', '1.5']) {
+    expect(
+      (
+        await relayManagement(
+          request(`log-archives?limit=${limit}`),
+          'log-archives',
+          config,
+          fetcher
+        )
+      ).status
+    ).toBe(400);
+  }
+});

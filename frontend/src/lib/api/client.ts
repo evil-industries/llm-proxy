@@ -6,6 +6,9 @@ import type {
   RequestLogPreviewQuery,
   AuthFile,
   BooleanSetting,
+  LogArchiveFile,
+  LogArchivesQuery,
+  LogArchivesResponse,
   LogsQuery,
   LogsResponse,
   ManagementConfig,
@@ -14,7 +17,7 @@ import type {
   PluginList,
   RoutingStrategy
 } from './types';
-import { validManagementResponse } from './validation';
+import { validManagementResponse, validArchiveKey } from './validation';
 
 export type ManagementErrorCode =
   | 'authentication'
@@ -203,6 +206,27 @@ function createClient(base: string, key: string | undefined, fetcher: typeof glo
     getCodexDeviceAuth: (signal?: AbortSignal) => deviceAuth('GET', signal),
     startCodexDeviceAuth: (signal?: AbortSignal) => deviceAuth('POST', signal),
     cancelCodexDeviceAuth: (signal?: AbortSignal) => deviceAuth('DELETE', signal),
+    listLogArchives(query: LogArchivesQuery = {}, signal?: AbortSignal) {
+      const params = new URLSearchParams();
+      if (query.cursor) params.set('cursor', query.cursor);
+      if (query.limit !== undefined) params.set('limit', String(query.limit));
+      return request<LogArchivesResponse>(
+        `/log-archives${params.size ? `?${params}` : ''}`,
+        'GET',
+        undefined,
+        signal
+      );
+    },
+    getLogArchiveDownloadURL(file: Pick<LogArchiveFile, 'source' | 'key'>) {
+      if (key)
+        throw new ManagementError(
+          'invalid-request',
+          'Download logs through the signed-in management console.'
+        );
+      if (!validArchiveKey(file.source, file.key))
+        throw new ManagementError('invalid-request', 'Choose a valid log archive.');
+      return `${base}/log-archives/download?${new URLSearchParams({ source: file.source, key: file.key })}`;
+    },
     async listRequestLogs(signal?: AbortSignal): Promise<RequestLogFile[]> {
       const result = await request<{ files: RequestLogFile[] }>(
         '/request-logs',

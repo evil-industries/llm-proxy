@@ -2,17 +2,21 @@ package logging
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementevents"
 	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/logarchive"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementevents"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -186,7 +190,7 @@ func ResolveLogDirectory(cfg *config.Config) string {
 // ConfigureLogOutput switches the global log destination between rotating files and stdout.
 // When logsMaxTotalSizeMB > 0, a background cleaner removes the oldest log files in the logs directory
 // until the total size is within the limit.
-func ConfigureLogOutput(cfg *config.Config) error {
+func ConfigureLogOutput(cfg *config.Config) (errConfigure error) {
 	SetupBaseLogger()
 
 	writerMu.Lock()
@@ -195,6 +199,18 @@ func ConfigureLogOutput(cfg *config.Config) error {
 	logDir := ResolveLogDirectory(cfg)
 
 	protectedPath := ""
+	// A reload must stop the old destination before publishing any new segment.
+	// Keep directory ownership intact so in-flight request loggers survive reload.
+	stopLogDirCleanerLocked()
+	logarchive.Quiesce()
+	defer func() {
+		if errArchive := logarchive.Configure(logDir, cfg.LogArchive); errArchive != nil {
+			errConfigure = errors.Join(errConfigure, fmt.Errorf("logging: configure archive: %w", errArchive))
+		}
+		if errConfigure == nil {
+			configureLogDirCleanerLocked(logDir, cfg.LogsMaxTotalSizeMB, protectedPath)
+		}
+	}()
 	if cfg.LoggingToFile {
 		if err := os.MkdirAll(logDir, 0o755); err != nil {
 			return fmt.Errorf("logging: failed to create log directory: %w", err)
@@ -212,14 +228,44 @@ func ConfigureLogOutput(cfg *config.Config) error {
 		}
 		log.SetOutput(eventLogWriter{logWriter})
 	} else {
+		// SetOutput serializes against in-flight logrus writes. The old writer
+		// must have no remaining producers when its final segment is published.
+		log.SetOutput(os.Stdout)
+		closedPath := filepath.Join(logDir, "main.log")
 		if logWriter != nil {
-			_ = logWriter.Close()
+			closedPath = logWriter.Filename
+			if errClose := logWriter.Close(); errClose != nil {
+				return fmt.Errorf("logging: close application log: %w", errClose)
+			}
 			logWriter = nil
 		}
-		log.SetOutput(os.Stdout)
+		if cfg.LogArchive.Enabled {
+			// This also recovers a previous process's final main.log when the
+			// replacement process starts with file logging disabled.
+			if errPublish := publishClosedApplicationLog(closedPath); errPublish != nil {
+				return errPublish
+			}
+		}
 	}
 
-	configureLogDirCleanerLocked(logDir, cfg.LogsMaxTotalSizeMB, protectedPath)
+	return nil
+}
+
+func publishClosedApplicationLog(path string) error {
+	info, errStat := os.Lstat(path)
+	if os.IsNotExist(errStat) {
+		return nil
+	}
+	if errStat != nil {
+		return fmt.Errorf("logging: inspect final application log: %w", errStat)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("logging: final application log is not a regular file")
+	}
+	name := "main-" + time.Now().Format("2006-01-02T15-04-05.000") + "." + uuid.NewString() + ".log"
+	if errRename := os.Rename(path, filepath.Join(filepath.Dir(path), name)); errRename != nil {
+		return fmt.Errorf("logging: publish final application log: %w", errRename)
+	}
 	return nil
 }
 
@@ -228,6 +274,7 @@ func closeLogOutputs() {
 	defer writerMu.Unlock()
 
 	stopLogDirCleanerLocked()
+	logarchive.Stop()
 
 	if logWriter != nil {
 		_ = logWriter.Close()

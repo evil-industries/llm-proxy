@@ -154,6 +154,27 @@ logs-max-total-size-mb: 0
 # When exceeded, the oldest error log files are deleted. Default is 10. Set to 0 to disable cleanup.
 error-logs-max-files: 10
 
+# Preserve application, request, and error logs in an existing S3-compatible bucket.
+# Completed logs are gzip-compressed, uploaded, and read back to verify integrity
+# before their local copies are reclaimed. Failed uploads remain on disk for retry.
+# When enabled, automatic size/count deletion and the clear-logs API are disabled.
+# Set logging-to-file: true to archive application logs, and request-log: true to
+# capture successful request/response logs as well as errors.
+# The bucket must have no expiration lifecycle rule for this prefix.
+# See docs/log-archival.md for credentials, downloads, and outage behavior.
+log-archive:
+  enabled: false
+  endpoint: "https://s3.amazonaws.com"
+  bucket: ""
+  region: ""
+  prefix: "logs"
+  # Leave credentials empty to use AWS environment credentials or an IAM role.
+  access-key-id: ""
+  secret-access-key: ""
+  session-token: ""
+  # Enable for S3-compatible services that require path-style bucket addressing.
+  path-style: false
+
 # When false, disable in-memory usage statistics aggregation
 usage-statistics-enabled: false
 

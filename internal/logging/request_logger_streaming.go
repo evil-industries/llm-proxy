@@ -2,11 +2,15 @@ package logging
 
 import (
 	"bytes"
+	"context"
 	"fmt"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementevents"
 	"os"
+	"path/filepath"
+	"sync/atomic"
 	"time"
 
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/logarchive"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementevents"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -15,7 +19,12 @@ import (
 // The final log file is assembled when Close is called.
 type FileStreamingLogWriter struct {
 	// logFilePath is the final log file path.
-	logFilePath string
+	logFilePath      string
+	archiveDirectory *logarchive.Directory
+	preserve         bool
+	preserveLatched  atomic.Bool
+	homeEnabled      bool
+	requestID        string
 
 	// url is the request URL (masked upstream in middleware).
 	url string
@@ -75,7 +84,26 @@ type FileStreamingLogWriter struct {
 	apiResponseTimestamp time.Time
 }
 
-// WriteChunkAsync writes a response chunk asynchronously (non-blocking).
+// PreserveLogs keeps this request lossless after archival is enabled, including
+// when a later configuration reload disables archival before queued chunks drain.
+func (w *FileStreamingLogWriter) PreserveLogs() {
+	w.preserveLatched.Store(true)
+}
+
+// PreservingLogs exposes the latched policy to the middleware owning other
+// source fragments from this request, including when only this queue saw enablement.
+func (w *FileStreamingLogWriter) PreservingLogs() bool { return w.preservingLogs() }
+
+func (w *FileStreamingLogWriter) preservingLogs() bool {
+	if w.preserve || w.preserveLatched.Load() || logarchive.Enabled() {
+		w.PreserveLogs()
+		return true
+	}
+	return false
+}
+
+// WriteChunkAsync enqueues a response chunk, using backpressure once archival
+// has been enabled during this request.
 //
 // Parameters:
 //   - chunk: The response chunk to write
@@ -88,6 +116,11 @@ func (w *FileStreamingLogWriter) WriteChunkAsync(chunk []byte) {
 	chunkCopy := make([]byte, len(chunk))
 	copy(chunkCopy, chunk)
 
+	// Archival must retain every captured chunk, applying disk backpressure.
+	if w.preservingLogs() {
+		w.chunkChan <- chunkCopy
+		return
+	}
 	// Non-blocking send
 	select {
 	case w.chunkChan <- chunkCopy:
@@ -208,25 +241,42 @@ func (w *FileStreamingLogWriter) Close() error {
 		w.chunkChan = nil
 	}
 
+	completed := false
+	var pendingPath string
+	defer func() {
+		if w.preservingLogs() && !completed {
+			w.archiveDirectory.Recover(pendingPath, w.requestBodyPath, w.responseBodyPath)
+			recoverFileBodySources(w.apiRequestSource, w.apiResponseSource)
+			return
+		}
+		w.cleanupTempFiles()
+		cleanupFileBodySources(w.apiRequestSource, w.apiResponseSource)
+		if !completed {
+			removeRequestStagingFile(pendingPath)
+		}
+	}()
+
 	select {
 	case errWrite := <-w.errorChan:
-		w.cleanupTempFiles()
 		return errWrite
 	default:
 	}
 
 	if w.logFilePath == "" {
-		w.cleanupTempFiles()
+		completed = true
 		return nil
 	}
 
-	logFile, errOpen := os.OpenFile(w.logFilePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	logFile, errOpen := os.CreateTemp(filepath.Dir(w.logFilePath), ".request-log-*.pending")
 	if errOpen != nil {
-		w.cleanupTempFiles()
 		return fmt.Errorf("failed to create log file: %w", errOpen)
 	}
 
+	pendingPath = logFile.Name()
 	writeErr := w.writeFinalLog(logFile)
+	if writeErr == nil {
+		writeErr = logFile.Sync()
+	}
 	defer managementevents.Publish(managementevents.RequestLogs)
 	if errClose := logFile.Close(); errClose != nil {
 		log.WithError(errClose).Warn("failed to close request log file")
@@ -235,8 +285,28 @@ func (w *FileStreamingLogWriter) Close() error {
 		}
 	}
 
-	w.cleanupTempFiles()
-	return writeErr
+	if writeErr != nil {
+		return writeErr
+	}
+	var homeText []byte
+	if w.homeEnabled {
+		var errRead error
+		homeText, errRead = os.ReadFile(logFile.Name())
+		if errRead != nil {
+			log.Warn("failed to read request log for home; local archive preserved")
+		}
+	}
+	if errRename := os.Rename(logFile.Name(), w.logFilePath); errRename != nil {
+		return fmt.Errorf("failed to publish request log: %w", errRename)
+	}
+	completed = true
+	if homeText != nil {
+		logger := &FileRequestLogger{homeEnabled: true}
+		if errHome := logger.forwardRequestLogToHome(context.Background(), w.requestHeaders, w.requestID, string(homeText)); errHome != nil {
+			log.Warn("failed to forward request log to home; local archive preserved")
+		}
+	}
+	return nil
 }
 
 // asyncWriter runs in a goroutine to buffer chunks from the channel.

@@ -26,6 +26,21 @@
   const client = createSessionManagementClient(async (input) => {
     if (failure) return Response.json({}, { status: 502 });
     const url = new URL(String(input), 'http://story.invalid');
+    if (url.pathname.endsWith('/log-archives'))
+      return Response.json({
+        files: empty
+          ? []
+          : [
+              {
+                source: 's3',
+                key: 'logs/request-demo.log.gz',
+                name: 'request-demo.log.gz',
+                size: 84,
+                modified: 1789635900
+              }
+            ],
+        next_cursor: ''
+      });
     if (url.pathname.endsWith('/request-logs'))
       return Response.json({
         files: empty

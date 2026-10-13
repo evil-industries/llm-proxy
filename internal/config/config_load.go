@@ -96,6 +96,10 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	if errValidate := cfg.Notifications.Validate(); errValidate != nil {
 		return nil, errValidate
 	}
+	cfg.LogArchive = cfg.LogArchive.WithDefaults()
+	if errValidate := cfg.LogArchive.Validate(); errValidate != nil {
+		return nil, errValidate
+	}
 	cfg.CredentialConcurrency = cfg.CredentialConcurrency.WithDefaults()
 	if errValidate := cfg.CredentialInFlight.Validate(); errValidate != nil {
 		return nil, errValidate

@@ -39,6 +39,7 @@ const attemptMaxIdleTime = 2 * time.Hour
 
 // Handler aggregates config reference, persistence path and helpers.
 type Handler struct {
+	logArchiveReaderFactory func(config.LogArchiveConfig) (logArchiveReader, error)
 	eventsMu                sync.Mutex
 	eventsClosed            bool
 	eventStreams            map[chan struct{}]struct{}

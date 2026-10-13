@@ -8,19 +8,28 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/logarchive"
 	log "github.com/sirupsen/logrus"
 )
 
 // FileBodySource stores large log sections as ordered temp-file parts.
 type FileBodySource struct {
-	mu      sync.Mutex
-	dir     string
-	paths   []string
-	cleaned bool
+	mu               sync.Mutex
+	dir              string
+	paths            []string
+	cleaned          bool
+	archiveDirectory *logarchive.Directory
 }
 
 // NewFileBodySourceInDir creates a temp-backed source under baseDir.
 func NewFileBodySourceInDir(baseDir string, prefix string) (*FileBodySource, error) {
+	if strings.TrimSpace(baseDir) == "" {
+		return nil, fmt.Errorf("base directory is required")
+	}
+	return newFileBodySourceInDir(baseDir, prefix, logarchive.RegisterDirectory(baseDir))
+}
+
+func newFileBodySourceInDir(baseDir string, prefix string, archiveDirectory *logarchive.Directory) (*FileBodySource, error) {
 	prefix = sanitizeTempPrefix(prefix)
 	baseDir = strings.TrimSpace(baseDir)
 	if baseDir == "" {
@@ -33,7 +42,7 @@ func NewFileBodySourceInDir(baseDir string, prefix string) (*FileBodySource, err
 	if errCreate != nil {
 		return nil, errCreate
 	}
-	return &FileBodySource{dir: dir}, nil
+	return &FileBodySource{dir: dir, archiveDirectory: archiveDirectory}, nil
 }
 
 func sanitizeTempPrefix(prefix string) string {
@@ -256,5 +265,22 @@ func cleanupFileBodySources(sources ...*FileBodySource) {
 		if errCleanup := source.Cleanup(); errCleanup != nil {
 			log.WithError(errCleanup).Warn("failed to clean up log part files")
 		}
+	}
+}
+
+// recoverFileBodySources transfers only finalized sources to their owning service.
+func recoverFileBodySources(sources ...*FileBodySource) {
+	for _, source := range sources {
+		if source != nil {
+			source.Recover()
+		}
+	}
+}
+
+// Recover queues finalized source parts for lossless archival after a logging failure.
+// All producers must have stopped writing before this method is called.
+func (s *FileBodySource) Recover() {
+	if s != nil {
+		s.archiveDirectory.Recover(s.Paths()...)
 	}
 }
