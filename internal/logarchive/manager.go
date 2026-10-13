@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,11 +23,6 @@ import (
 // Only immutable, completed logs are archived. Request writers publish closed
 // files by rename; lumberjack closes the application log before rotating it.
 const scanInterval = time.Minute
-
-var completedLogPattern = regexp.MustCompile(`^(main-[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}-[0-9]{2}-[0-9]{2}\.[0-9]{3}|.+-[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{6}-.+|recovered-.+)\.log(\.gz)?$`)
-
-// IsCompletedLogName recognizes immutable files emitted by the log writers.
-func IsCompletedLogName(name string) bool { return completedLogPattern.MatchString(name) }
 
 type verifiedUploader interface {
 	UploadVerified(context.Context, string, string) error

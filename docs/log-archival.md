@@ -35,7 +35,8 @@ S3 endpoint, set `endpoint` and, if required, `path-style: true`. HTTPS is the
 default; an explicit `http://` endpoint supports local S3-compatible services.
 
 The archive identity needs `s3:ListBucket` on the bucket and `s3:PutObject` and
-`s3:GetObject` on the selected prefix. Multipart uploads may additionally need
+`s3:GetObject` on the selected prefix. If `region` is omitted, allow
+`s3:GetBucketLocation` for region discovery. Multipart uploads may additionally need
 `s3:AbortMultipartUpload` and `s3:ListMultipartUploadParts`. SSE-KMS buckets also
 need the corresponding KMS permissions. The application does not create buckets,
 change lifecycle policies, or need `s3:DeleteObject`.

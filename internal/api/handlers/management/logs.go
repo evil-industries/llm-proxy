@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -1288,59 +1287,13 @@ func isRotatedLogFile(name string) bool {
 }
 
 func rotationOrder(name string) (int64, bool) {
-	if order, ok := numericRotationOrder(name); ok {
-		return order, true
-	}
-	if order, ok := timestampRotationOrder(name); ok {
-		return order, true
-	}
-	return 0, false
+	return logarchive.ApplicationRotationOrder(name)
 }
 
 func numericRotationOrder(name string) (int64, bool) {
-	if !strings.HasPrefix(name, defaultLogFileName+".") {
-		return 0, false
-	}
-	suffix := strings.TrimPrefix(name, defaultLogFileName+".")
-	if suffix == "" {
-		return 0, false
-	}
-	n, err := strconv.Atoi(suffix)
-	if err != nil {
-		return 0, false
-	}
-	return int64(n), true
+	return logarchive.NumericRotationOrder(name)
 }
 
 func timestampRotationOrder(name string) (int64, bool) {
-	ext := filepath.Ext(defaultLogFileName)
-	base := strings.TrimSuffix(defaultLogFileName, ext)
-	if base == "" {
-		return 0, false
-	}
-	prefix := base + "-"
-	if !strings.HasPrefix(name, prefix) {
-		return 0, false
-	}
-	clean := strings.TrimPrefix(name, prefix)
-	if strings.HasSuffix(clean, ".gz") {
-		clean = strings.TrimSuffix(clean, ".gz")
-	}
-	if ext != "" {
-		if !strings.HasSuffix(clean, ext) {
-			return 0, false
-		}
-		clean = strings.TrimSuffix(clean, ext)
-	}
-	if clean == "" {
-		return 0, false
-	}
-	if idx := strings.IndexByte(clean, '.'); idx != -1 {
-		clean = clean[:idx]
-	}
-	parsed, err := time.ParseInLocation("2006-01-02T15-04-05", clean, time.Local)
-	if err != nil {
-		return 0, false
-	}
-	return math.MaxInt64 - parsed.Unix(), true
+	return logarchive.TimestampRotationOrder(name)
 }

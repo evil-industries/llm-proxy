@@ -67,7 +67,9 @@ func (s *Service) Run(ctx context.Context) error {
 		}
 	}()
 
-	if s.cfg != nil && s.cfg.LogArchive.Enabled {
+	// Stop preserves the archival guard so pending logs remain protected. A new
+	// SDK service must explicitly apply its opt-out before serving requests.
+	if s.cfg != nil && (s.cfg.LogArchive.Enabled || logarchive.Enabled()) {
 		if errConfigure := logging.ConfigureLogOutput(s.cfg); errConfigure != nil {
 			return fmt.Errorf("cliproxy: configure log archival: %w", errConfigure)
 		}

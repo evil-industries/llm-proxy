@@ -185,3 +185,86 @@ func TestManagerPreservesExistingGzipBytes(t *testing.T) {
 		}
 	}
 }
+
+func TestManagerArchivesLegacyApplicationRotations(t *testing.T) {
+	dir := t.TempDir()
+	originals := map[string][]byte{}
+	compressedOriginals := map[string][]byte{}
+	for _, base := range []string{"main.log.1", "main-2026-06-15T10-00-00.log", "main-2026-06-15T10-00-00.123.log"} {
+		for _, compressed := range []bool{false, true} {
+			name := base
+			if compressed {
+				name += ".gz"
+			}
+			contents := []byte("complete legacy application log: " + name + "\n")
+			originals[name] = contents
+			stored := contents
+			if compressed {
+				var buffer bytes.Buffer
+				zipper := gzip.NewWriter(&buffer)
+				if _, err := zipper.Write(contents); err != nil {
+					t.Fatal(err)
+				}
+				if err := zipper.Close(); err != nil {
+					t.Fatal(err)
+				}
+				stored = buffer.Bytes()
+				compressedOriginals[name] = stored
+			}
+			writeFixture(t, filepath.Join(dir, name), stored)
+		}
+	}
+	excluded := []string{"main.log", "main.log.gz", "main.log.one", "main.log.1.tmp", "main-2026-99-15T10-00-00.log", "custom.log"}
+	for _, name := range excluded {
+		writeFixture(t, filepath.Join(dir, name), []byte("keep local"))
+	}
+	uploader := &recordingUploader{}
+	if err := testWorker(dir, uploader).scan(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(uploader.uploads) != len(originals) {
+		t.Fatalf("uploads=%d, want %d", len(uploader.uploads), len(originals))
+	}
+	for name, original := range originals {
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Fatalf("verified rotation %s not reclaimed: %v", name, err)
+		}
+		archivedName := name
+		if !strings.HasSuffix(archivedName, ".gz") {
+			archivedName += ".gz"
+		}
+		found := false
+		for key, raw := range uploader.uploads {
+			if !strings.HasSuffix(key, "/"+archivedName) {
+				continue
+			}
+			reader, err := gzip.NewReader(bytes.NewReader(raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			restored, err := io.ReadAll(reader)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := reader.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(restored, original) {
+				continue
+			}
+			if compressed, ok := compressedOriginals[name]; ok && !bytes.Equal(compressed, raw) {
+				t.Fatalf("existing gzip %s changed", name)
+			}
+			found = true
+		}
+		if !found {
+			t.Fatalf("lossless archive missing for %s", name)
+		}
+	}
+	for _, name := range excluded {
+		raw, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil || string(raw) != "keep local" {
+			t.Fatalf("excluded file %s changed: %v", name, err)
+		}
+	}
+}
