@@ -69,8 +69,9 @@ than a reconstructed complete request. Files still being written in the current
 process are never treated as crash leftovers.
 
 Enabling archival during a streaming request applies backpressure to subsequent
-chunks in both capture queues. The request keeps that preservation policy through
-finalization even if archival is disabled again. Bytes dropped before archival
+chunks in both capture queues. Home streams also switch to a local archive spool,
+including when Home is unavailable. The request keeps that preservation policy
+through finalization even if archival is disabled again. Bytes dropped before archival
 was enabled cannot be recovered.
 
 While archival is enabled, `logs-max-total-size-mb`, `error-logs-max-files`, and

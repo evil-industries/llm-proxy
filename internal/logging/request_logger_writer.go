@@ -230,12 +230,12 @@ func (l *FileRequestLogger) LogStreamingRequest(url, method string, headers map[
 
 	if l.homeEnabled && !logarchive.Enabled() {
 		client := currentHomeRequestLogClient()
-		if client == nil || !client.HeartbeatOK() {
-			return &NoOpStreamingLogWriter{}, nil
-		}
-		return newHomeStreamingLogWriter(url, method, headers, body, requestID), nil
+		return newHomeStreamingLogWriter(l, client != nil && client.HeartbeatOK(), url, method, headers, body, requestID), nil
 	}
+	return l.newFileStreamingLogWriter(url, method, headers, body, requestID)
+}
 
+func (l *FileRequestLogger) newFileStreamingLogWriter(url, method string, headers map[string][]string, body []byte, requestID string) (*FileStreamingLogWriter, error) {
 	// Ensure logs directory exists
 	if err := l.ensureLogsDir(); err != nil {
 		return nil, fmt.Errorf("failed to create logs directory: %w", err)
