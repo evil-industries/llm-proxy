@@ -192,3 +192,19 @@ export interface LogArchivesQuery {
   cursor?: string;
   limit?: number;
 }
+
+export interface ThroughputSnapshot {
+  enabled: boolean;
+  updated_at: string;
+  metrics: {
+    window_seconds: number;
+    requests: number;
+    failed: number;
+    output_tokens: number;
+    requests_per_minute: number;
+    output_tokens_per_second: number;
+    generation_tokens_per_second: number | null;
+    average_latency_ms: number | null;
+    average_ttft_ms: number | null;
+  };
+}

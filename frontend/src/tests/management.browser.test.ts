@@ -4,7 +4,14 @@ import { render } from 'vitest-browser-svelte';
 import ManagementApp from '$lib/components/ManagementApp.svelte';
 import LoginPanel from '$lib/components/LoginPanel.svelte';
 import LoginPage from '../routes/login/+page.svelte';
-import { demoConfig, demoFiles, demoNotifications } from '$lib/demo';
+import {
+  demoConfig,
+  demoFiles,
+  demoSubscriptions,
+  demoNotifications,
+  demoThroughput
+} from '$lib/demo';
+import type { AuthFile, ThroughputSnapshot } from '$lib/api';
 
 const sections = [
   'Overview',
@@ -44,17 +51,21 @@ test.each([390, 1280])(
   }
 );
 
-function mockServer() {
+function mockServer(
+  files: AuthFile[] = [
+    {
+      ...demoFiles[0],
+      name: longName,
+      email: `${'account'.repeat(32)}@example.com`,
+      status_message: 'Upstream status: ' + 'a'.repeat(280),
+      auth_index: 'auth-test'
+    }
+  ],
+  throughput: ThroughputSnapshot = demoThroughput
+) {
   const state = {
-    files: [
-      {
-        ...demoFiles[0],
-        name: longName,
-        email: `${'account'.repeat(32)}@example.com`,
-        status_message: 'Upstream status: ' + 'a'.repeat(280),
-        auth_index: 'auth-test'
-      }
-    ],
+    files,
+    throughput,
     keys: [longKey],
     config: structuredClone(demoConfig),
     failRefresh: false,
@@ -75,6 +86,7 @@ function mockServer() {
       return Response.json({ error: secret }, { status: 503 });
     if (state.failMutation && method !== 'GET')
       return Response.json({ error: secret }, { status: 503 });
+    if (path === '/throughput') return Response.json(state.throughput);
     if (path === '/config') return Response.json(state.config);
     if (path === '/notifications') return Response.json(demoNotifications);
     if (path === '/auth-files/status' && method === 'PATCH') {
@@ -203,10 +215,11 @@ async function assertNoClipping(label: string) {
           visible.left + visible.width / 2,
           visible.top + visible.height / 2
         );
-        if (!hit || !element.contains(hit))
+        if (!hit || !element.contains(hit)) {
           failures.push(
             `${element.getAttribute('aria-label') || element.textContent?.trim()} control is covered or unreachable`
           );
+        }
       }
     }
     for (const node of element.childNodes) {
@@ -277,6 +290,70 @@ describe('responsive management screens in Chromium', () => {
               .toHaveValue(20);
           if (zoom === 2) enlargeText();
           await assertNoClipping(section);
+          document
+            .querySelectorAll<HTMLElement>('[style]')
+            .forEach((el) => el.style.removeProperty('font-size'));
+        }
+      });
+    }
+  }
+});
+
+describe('expanded navigation and quota stress layouts', () => {
+  for (const width of [320, 760, 761, 1024, 1440]) {
+    for (const zoom of [1, 2]) {
+      test(`${width}px, ${zoom * 100}% text: long accounts and large metrics remain readable`, async () => {
+        // Expand on desktop, then resize to also test a session crossing the mobile breakpoint.
+        await page.viewport(1280, 600);
+        const files = [...demoSubscriptions, ...demoFiles].map((file, index) => ({
+          ...file,
+          name: `${index}-${longName}`,
+          auth_index: `stress-${index}`,
+          email: `${'very-long-account-name'.repeat(20)}-${index}@example.com`
+        }));
+        mockServer(files, {
+          ...demoThroughput,
+          metrics: {
+            ...demoThroughput.metrics,
+            requests: 123456789,
+            failed: 1234567,
+            output_tokens: 987654321098,
+            output_tokens_per_second: 12345678.9,
+            requests_per_minute: 9876543.2,
+            generation_tokens_per_second: 123456.7,
+            average_latency_ms: 12345678,
+            average_ttft_ms: 9876543
+          }
+        });
+        await render(ManagementApp);
+        await expect.element(page.getByRole('button', { name: 'Refresh data' })).toBeEnabled();
+        await expect.element(page.getByRole('heading', { name: 'Live throughput' })).toBeVisible();
+        await page.getByRole('button', { name: 'Expand sidebar' }).click();
+        await page.viewport(width, 600);
+        for (const section of sections) {
+          await navigate(section);
+          if (section === 'Overview' || section === 'Quota management') {
+            await page.getByRole('button', { name: 'Show emails' }).click();
+            if (zoom === 2) enlargeText();
+            await assertNoClipping(`${section}: Codex summary`);
+            document
+              .querySelectorAll<HTMLElement>('[style]')
+              .forEach((el) => el.style.removeProperty('font-size'));
+            await page
+              .getByRole('group', { name: 'Filter usage by provider' })
+              .getByRole('button', { name: /^All/ })
+              .click();
+          }
+          if (section === 'API keys')
+            await page.getByRole('button', { name: 'Reveal key 1', exact: true }).click();
+          if (section === 'Logs')
+            await expect.element(page.getByRole('region', { name: 'Log output' })).toBeVisible();
+          if (section === 'Settings')
+            await expect
+              .element(page.getByLabelText('Warning remaining quota (%)'))
+              .toHaveValue(20);
+          if (zoom === 2) enlargeText();
+          await assertNoClipping(`${section}: expanded navigation`);
           document
             .querySelectorAll<HTMLElement>('[style]')
             .forEach((el) => el.style.removeProperty('font-size'));

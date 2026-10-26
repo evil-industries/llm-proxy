@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -93,4 +94,34 @@ func requireRecordID(t *testing.T, raw json.RawMessage, want int) {
 	if payload.ID != want {
 		t.Fatalf("record id = %d, want %d", payload.ID, want)
 	}
+}
+
+func TestGetThroughputDoesNotConsumeUsageQueue(t *testing.T) {
+	withManagementUsageQueue(t, func() {
+		redisqueue.Enqueue([]byte(`{"api_key":"private-test-key"}`))
+		rec := httptest.NewRecorder()
+		ginCtx, _ := gin.CreateTestContext(rec)
+		ginCtx.Request = httptest.NewRequest(http.MethodGet, "/v0/management/throughput", nil)
+		(&Handler{}).GetThroughput(ginCtx)
+		var payload struct {
+			Enabled   bool           `json:"enabled"`
+			UpdatedAt string         `json:"updated_at"`
+			Metrics   map[string]any `json:"metrics"`
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status: %d", rec.Code)
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.UpdatedAt == "" || payload.Metrics["window_seconds"] == nil {
+			t.Fatalf("invalid response: %s", rec.Body)
+		}
+		if strings.Contains(rec.Body.String(), "private-test-key") || strings.Contains(rec.Body.String(), "api_key") {
+			t.Fatal("throughput leaks queue identifiers")
+		}
+		if len(redisqueue.PopOldest(1)) != 1 {
+			t.Fatal("throughput consumed usage queue")
+		}
+	})
 }

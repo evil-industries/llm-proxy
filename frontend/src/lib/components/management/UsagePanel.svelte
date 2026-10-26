@@ -9,7 +9,7 @@
     subscriptionReset
   } from '$lib/codex';
   import { onMount } from 'svelte';
-  import { Layers, Eye, EyeOff } from '@lucide/svelte';
+  import { Layers, Eye, EyeOff, Search } from '@lucide/svelte';
   import type { AuthFile } from '$lib/api';
   import ProviderIcon from '$lib/components/ProviderIcon.svelte';
   import AccountQuota from './AccountQuota.svelte';
@@ -20,6 +20,8 @@
   let { files, onaccounts }: { files: AuthFile[]; onaccounts?: () => void } = $props();
   let provider = $state<string>();
   let showEmails = $state(false);
+  let search = $state('');
+  let sort = $state('default');
   let now = $state(Date.now());
   onMount(() => {
     const timer = setInterval(() => (now = Date.now()), 30_000);
@@ -72,6 +74,32 @@
         ? 'codex'
         : 'all'
   );
+  const visibleGroups = $derived(
+    groups
+      .filter((group) => selected === 'all' || selected === group.name)
+      .map((group) => ({
+        ...group,
+        accounts: group.accounts
+          .filter((file) =>
+            [file.name, file.email, file.label].some((value) =>
+              value?.toLowerCase().includes(search.trim().toLowerCase())
+            )
+          )
+          .toSorted((a, b) =>
+            sort === 'name'
+              ? a.name.localeCompare(b.name)
+              : sort === 'remaining'
+                ? tightest(b) - tightest(a)
+                : 0
+          )
+      }))
+  );
+  const matches = $derived(visibleGroups.reduce((sum, group) => sum + group.accounts.length, 0));
+  function tightest(file: AuthFile) {
+    if (file.disabled || file.unavailable) return -1;
+    const windows = accountQuota(file).windows.filter((window) => !quotaStale(window, now));
+    return windows.length ? Math.min(...windows.map((window) => window.remaining)) : -1;
+  }
 </script>
 
 <section aria-labelledby="usage-title" class="quota-management">
@@ -116,6 +144,26 @@
       Connect an account to see its remaining usage.
     </div>
   {:else}
+    <div class="ledger-toolbar">
+      <label class="search-field"
+        ><Search size={15} /><input
+          aria-label="Search credentials"
+          placeholder="Search by filename or email"
+          bind:value={search}
+        /></label
+      >
+      <span class="muted result-count"
+        >{matches} {matches === 1 ? 'credential' : 'credentials'}</span
+      >
+      <label class="sort-field"
+        ><span class="sr-only">Sort credentials</span><select
+          aria-label="Sort credentials"
+          bind:value={sort}
+          ><option value="default">Default order</option><option value="name">Filename</option
+          ><option value="remaining">Most quota remaining</option></select
+        ></label
+      >
+    </div>
     {#if selected === 'codex'}<CodexSummary {files} {now} {showEmails} />{:else}
       <div class="provider-summaries">
         {#each groups.filter((group) => selected === 'all' || selected === group.name) as group}
@@ -150,7 +198,7 @@
           </div>
         {/each}
       </div>{/if}
-    {#each groups.filter((group) => selected === 'all' || selected === group.name) as group}
+    {#each visibleGroups.filter((group) => group.accounts.length) as group}
       <div class="provider-ledger">
         <div class="ledger-heading">
           <h3>{group.name}<span>{group.accounts.length}</span></h3>
@@ -189,10 +237,57 @@
         {/each}
       </div>
     {/each}
+    {#if !matches}<div class="empty-state" role="status">
+        No credentials match your search.
+      </div>{/if}
   {/if}
 </section>
 
 <style>
+  .ledger-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    padding: 15px 0;
+  }
+  .search-field {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    flex: 1 1 200px;
+    min-width: 0;
+    color: var(--muted-foreground);
+  }
+  .search-field :global(svg) {
+    flex-shrink: 0;
+  }
+  .search-field input {
+    min-width: 0;
+    width: 100%;
+    border: 0;
+    background: transparent;
+    padding: 6px 0;
+    color: var(--foreground);
+    font-size: 12px;
+  }
+  .search-field input::placeholder {
+    color: var(--muted-foreground);
+  }
+  .result-count {
+    font-size: 11px;
+  }
+  .sort-field {
+    min-width: 0;
+    max-width: 100%;
+  }
+  .sort-field select {
+    min-height: 32px;
+    font-size: 11px;
+    border-color: transparent;
+    background-color: transparent;
+  }
+
   .quota-actions {
     display: flex;
     flex-wrap: wrap;
@@ -220,10 +315,10 @@
   }
   .provider-tabs {
     display: flex;
-    gap: 20px;
+    gap: 16px;
     flex-wrap: wrap;
     border-bottom: 1px solid var(--border);
-    margin: 26px 0 22px;
+    margin: 18px 0 0;
   }
   .provider-tabs button {
     display: flex;
@@ -252,12 +347,16 @@
   .provider-summaries {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
-    gap: 24px 40px;
-    padding-block: 8px 20px;
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--muted);
+    overflow: hidden;
   }
   .provider-summary {
-    padding-block: 8px;
+    padding: 16px;
     min-width: 0;
+    border-right: 1px solid var(--border);
   }
   .summary-heading h3 {
     display: flex;
@@ -272,14 +371,14 @@
   }
   .summary-label {
     font-size: 12px;
-    margin-top: 24px;
+    margin-top: 16px;
   }
   .summary-value {
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
     gap: 0 6px;
-    font-size: 34px;
+    font-size: 25px;
     letter-spacing: -1.3px;
     font-weight: 600;
     margin-top: 3px;
@@ -290,10 +389,10 @@
     font-weight: 400;
   }
   .summary-bar {
-    height: 5px;
+    height: 4px;
     background: var(--muted);
     border-radius: 4px;
-    margin: 13px 0 15px;
+    margin: 8px 0 10px;
     overflow: hidden;
   }
   .summary-bar span {
@@ -311,10 +410,10 @@
     margin-top: 12px;
   }
   .provider-ledger {
-    margin-top: 32px;
+    margin-top: 24px;
   }
   .ledger-heading {
-    padding-bottom: 16px;
+    padding-bottom: 10px;
     border-bottom: 1px solid var(--border);
   }
   .ledger-heading h3 {
@@ -331,9 +430,9 @@
   }
   article {
     display: grid;
-    grid-template-columns: minmax(150px, 0.8fr) minmax(0, 2fr);
-    gap: 32px;
-    padding: 24px 0;
+    grid-template-columns: minmax(140px, 0.65fr) minmax(0, 2fr);
+    gap: 24px;
+    padding: 14px 0;
     border-bottom: 1px solid var(--border);
   }
   .account-heading {
@@ -345,10 +444,10 @@
   }
   .account-heading p {
     font-size: 12px;
-    margin: 7px 0;
+    margin: 4px 0;
     text-transform: capitalize;
   }
-  @media (max-width: 1000px) {
+  @media (max-width: 700px) {
     article {
       grid-template-columns: 1fr;
       gap: 16px;
@@ -356,7 +455,7 @@
   }
   @media (max-width: 480px) {
     .provider-summary {
-      padding: 12px 0;
+      padding: 14px;
     }
     .provider-tabs {
       gap: 12px;

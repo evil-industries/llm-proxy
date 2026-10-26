@@ -172,3 +172,19 @@ export const demoClient = createManagementClient({
     throw new Error('Demo mode is read-only.');
   }
 });
+
+export const demoThroughput = {
+  enabled: true,
+  updated_at: new Date().toISOString(),
+  metrics: {
+    window_seconds: 300,
+    requests: 84,
+    failed: 1,
+    output_tokens: 25440,
+    requests_per_minute: 16.8,
+    output_tokens_per_second: 84.8,
+    generation_tokens_per_second: 52.6,
+    average_latency_ms: 6800,
+    average_ttft_ms: 842
+  }
+};

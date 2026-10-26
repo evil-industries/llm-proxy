@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/redisqueue"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/throughput"
 )
 
 type usageQueueRecord []byte
@@ -52,4 +54,14 @@ func parseUsageQueueCount(value string) (int, error) {
 		return 0, errors.New("count must be a positive integer")
 	}
 	return count, nil
+}
+
+// GetThroughput returns anonymous aggregates without consuming the usage queue.
+func (h *Handler) GetThroughput(c *gin.Context) {
+	now := time.Now()
+	c.JSON(http.StatusOK, gin.H{
+		"enabled":    redisqueue.UsageStatisticsEnabled(),
+		"updated_at": now.UTC(),
+		"metrics":    throughput.Default.Snapshot(now),
+	})
 }

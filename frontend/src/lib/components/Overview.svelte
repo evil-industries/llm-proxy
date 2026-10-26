@@ -150,7 +150,7 @@
     border: 0;
   }
   .provider-name {
-    flex: 1;
+    flex: 1 1 120px;
     min-width: 0;
     overflow-wrap: anywhere;
   }

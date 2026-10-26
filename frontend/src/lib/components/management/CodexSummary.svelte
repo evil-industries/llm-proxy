@@ -64,18 +64,28 @@
   .subscription-summary {
     display: grid;
     grid-template-columns: repeat(var(--metric-columns), minmax(0, 1fr));
-    gap: 24px 32px;
-    padding-block: 24px 32px;
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--muted);
   }
   .metric {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 7px;
+    padding: 16px;
+    border-right: 1px solid var(--border);
     min-width: 0;
     overflow-wrap: anywhere;
   }
+  .metric:last-child {
+    border-right: 0;
+  }
+  .metric > .muted:first-child {
+    font-size: 11px;
+  }
   strong {
-    font-size: 32px;
+    font-size: 25px;
     font-weight: 600;
     line-height: 1.3;
     letter-spacing: -1px;
@@ -89,14 +99,14 @@
     color: var(--quota-color);
   }
   .reset-value {
-    font-size: 20px;
+    font-size: 16px;
     letter-spacing: -0.4px;
   }
   .metric-note {
-    font-size: 12px;
+    font-size: 11px;
     margin-top: auto;
   }
-  @media (max-width: 1200px) {
+  @media (max-width: 900px) {
     .subscription-summary {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ThroughputPanel from './ThroughputPanel.svelte';
   import { isCodex } from '$lib/codex';
   import RequestChart from './RequestChart.svelte';
   import { formatTime } from '$lib/datetime';
@@ -6,6 +7,7 @@
   import { onDestroy, onMount, untrack } from 'svelte';
   import {
     RefreshCw,
+    Network,
     LogOut,
     PanelLeftClose,
     PanelLeftOpen,
@@ -33,6 +35,7 @@
   } from '$lib/api';
   import {
     demoSubscriptions,
+    demoThroughput,
     demoKeys,
     demoConfig,
     demoClient,
@@ -69,7 +72,7 @@
   let keys = $state<string[]>(startInDemo ? [...demoKeys] : []);
   let config = $state<ManagementConfig>(startInDemo ? structuredClone(demoConfig) : {});
   let view = $state<View>('Overview');
-  let sidebarCollapsed = $state(false);
+  let sidebarCollapsed = $state(true);
   const navigationID = $props.id();
   let busy = $state(false);
   let notificationSaving = $state(false);
@@ -238,6 +241,10 @@
 <div class="app-shell" class:collapsed={sidebarCollapsed} class:logs-view={view === 'Logs'}>
   <aside class="sidebar">
     <div class="sidebar-header">
+      <div class="brand-mark" title="LLM Proxy"><Network size={20} /></div>
+      <span class="sidebar-label brand-name">LLM Proxy</span>
+    </div>
+    <div class="sidebar-toggle">
       <Button
         variant="ghost"
         size="icon-lg"
@@ -295,8 +302,14 @@
     {:else}
       <div class="page-heading">
         <div>
-          <p class="eyebrow">WORKSPACE / {view === 'Usage' ? 'QUOTAS' : view.toUpperCase()}</p>
           <h1>{view === 'Usage' ? 'Quota management' : view}</h1>
+          <p class="page-description">
+            <span class="mono">{files.length} credentials</span><span class="description-dot"
+              >·</span
+            ><span
+              >{files.filter((file) => !file.disabled && !file.unavailable).length} enabled</span
+            >
+          </p>
         </div>
         <div class="heading-actions">
           <span
@@ -333,6 +346,7 @@
       <div class="view-content" aria-busy={busy || notificationSaving}>
         {#if !updated}<div class="panel empty-state" role="status">Loading your instance…</div>
         {:else if view === 'Overview'}
+          <ThroughputPanel {client} initialData={demo ? demoThroughput : undefined} />
           {#if files.length === 0}<CodexDeviceAuth
               {client}
               live={!demo}
@@ -352,6 +366,7 @@
             <UsagePanel {files} />
           {/if}
         {:else if view === 'Usage'}
+          <ThroughputPanel {client} initialData={demo ? demoThroughput : undefined} />
           <UsagePanel {files} />
         {:else if view === 'Credentials'}
           <CredentialsPanel {client} data={files} onrefresh={refresh} disabled={demo || busy} />
@@ -390,7 +405,7 @@
   .app-shell {
     min-height: 100dvh;
     display: grid;
-    grid-template-columns: 232px minmax(0, 1fr);
+    grid-template-columns: 210px minmax(0, 1fr);
   }
   .app-shell.logs-view {
     height: 100dvh;
@@ -423,7 +438,7 @@
     height: 100dvh;
     display: flex;
     flex-direction: column;
-    padding: 30px 16px 20px;
+    padding: 18px 12px;
     border-right: 1px solid var(--border);
     background: var(--background);
   }
@@ -433,7 +448,8 @@
   .sidebar-header {
     display: flex;
     align-items: center;
-    padding-bottom: 28px;
+    gap: 10px;
+    padding: 0 6px 24px;
   }
   .collapsed .sidebar-label,
   .collapsed .nav-group > p,
@@ -445,24 +461,18 @@
     justify-content: center;
     padding-inline: 0;
   }
-  .collapsed nav {
-    gap: 4px;
-  }
   .collapsed .sidebar-header {
-    padding-bottom: 12px;
-  }
-  .collapsed .nav-group {
-    display: contents;
+    padding: 0 0 24px;
   }
   .collapsed .sidebar-footer {
     padding-inline: 0;
   }
   @media (min-width: 761px) {
     .app-shell.collapsed {
-      grid-template-columns: 72px minmax(0, 1fr);
+      grid-template-columns: 64px minmax(0, 1fr);
     }
     .collapsed .sidebar {
-      padding-inline: 14px;
+      padding-inline: 10px;
     }
     .collapsed .sidebar-header {
       justify-content: center;
@@ -471,7 +481,7 @@
   nav {
     min-width: 0;
     display: grid;
-    gap: 26px;
+    gap: 22px;
   }
   .nav-group {
     min-width: 0;
@@ -531,16 +541,57 @@
   }
   main {
     width: 100%;
-    max-width: 1600px;
+    max-width: 1680px;
     margin: 0 auto;
-    padding: 48px 48px 32px;
+    padding: 36px 32px 24px;
     min-width: 0;
   }
-  .eyebrow {
-    font-size: 10px;
-    letter-spacing: 1.5px;
+  .brand-mark {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    border-radius: 8px;
+    color: var(--background);
+    background: var(--primary);
+  }
+  .brand-name {
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .sidebar-toggle {
+    margin-bottom: 14px;
+  }
+  .collapsed .sidebar-toggle {
+    margin: auto 0 0;
+    order: 3;
+    padding-top: 16px;
+  }
+  .collapsed .nav-group + .nav-group {
+    border-top: 1px solid var(--border);
+    padding-top: 10px;
+    margin-top: 10px;
+  }
+  .collapsed .nav-group {
+    display: block;
+  }
+  .collapsed nav {
+    display: block;
+  }
+  .page-description {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
     color: var(--muted-foreground);
-    margin-bottom: 18px;
+    font-size: 11px;
+  }
+  .page-description > span:last-child {
+    color: var(--constructive);
+  }
+  .description-dot {
+    color: var(--muted-foreground);
   }
   .page-heading {
     display: flex;
@@ -548,7 +599,7 @@
     justify-content: space-between;
     align-items: center;
     gap: 20px;
-    margin-bottom: 32px;
+    margin-bottom: 24px;
   }
   .page-heading > div {
     min-width: 0;
@@ -566,7 +617,7 @@
   }
   .view-content {
     display: grid;
-    gap: 32px;
+    gap: 24px;
   }
   .error-stack {
     display: grid;
@@ -588,7 +639,7 @@
       padding: 32px 24px;
     }
     .app-shell {
-      grid-template-columns: 212px minmax(0, 1fr);
+      grid-template-columns: 210px minmax(0, 1fr);
     }
   }
   @media (max-width: 760px) {
@@ -608,9 +659,6 @@
       margin-bottom: 8px;
       gap: 8px;
     }
-    .logs-view .eyebrow {
-      display: none;
-    }
     .logs-view .instance-footer {
       margin-top: 8px;
     }
@@ -629,8 +677,40 @@
     .sidebar > * {
       flex-shrink: 0;
     }
-    .sidebar-header {
-      padding-bottom: 12px;
+    .sidebar-header,
+    .collapsed .sidebar-header {
+      display: none;
+    }
+    .sidebar-toggle,
+    .collapsed .sidebar-toggle {
+      display: none;
+    }
+    .collapsed nav {
+      display: flex;
+    }
+    .collapsed .nav-group {
+      display: contents;
+    }
+    .collapsed .nav-group + .nav-group {
+      border: 0;
+      padding: 0;
+      margin: 0;
+    }
+    .collapsed nav button {
+      width: 40px;
+    }
+    .collapsed .sidebar-footer {
+      display: flex;
+      margin-top: 0;
+      padding: 0;
+    }
+    .sidebar {
+      flex-direction: row;
+      align-items: flex-start;
+      gap: 4px;
+    }
+    .sidebar nav {
+      flex: 1;
     }
     .collapsed nav {
       gap: 4px;

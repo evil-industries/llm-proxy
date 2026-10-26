@@ -386,3 +386,17 @@ it('relays opaque archive pagination cursors and rejects out-of-bounds page size
     ).toBe(400);
   }
 });
+
+it('relays throughput as a read-only endpoint', async () => {
+  const fetcher = upstream();
+  expect((await relayManagement(request('throughput'), 'throughput', config, fetcher)).status).toBe(
+    200
+  );
+  expect(fetcher.mock.calls[0][0]).toBe('http://private-proxy:8317/v0/management/throughput');
+  fetcher.mockClear();
+  expect(
+    (await relayManagement(request('throughput', 'POST', '{}'), 'throughput', config, fetcher))
+      .status
+  ).toBe(404);
+  expect(fetcher).not.toHaveBeenCalled();
+});

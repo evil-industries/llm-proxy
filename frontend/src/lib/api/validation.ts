@@ -157,6 +157,24 @@ export function validManagementResponse(path: string, value: unknown): boolean {
         boolean(value.status.in_flight) &&
         fields(value.status, ['last_success_at', 'last_error', 'next_retry_at'], string)
       );
+    case '/throughput':
+      return (
+        object(value) &&
+        boolean(value.enabled) &&
+        string(value.updated_at) &&
+        object(value.metrics) &&
+        [
+          'window_seconds',
+          'requests',
+          'failed',
+          'output_tokens',
+          'requests_per_minute',
+          'output_tokens_per_second'
+        ].every((key) => count(value.metrics && (value.metrics as ObjectValue)[key])) &&
+        ['generation_tokens_per_second', 'average_latency_ms', 'average_ttft_ms'].every((key) =>
+          nullable(count)((value.metrics as ObjectValue)[key])
+        )
+      );
     case '/config':
       return config(value);
     case '/auth-files':
