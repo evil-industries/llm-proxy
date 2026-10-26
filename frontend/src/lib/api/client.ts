@@ -1,5 +1,6 @@
 import type {
   APIKeyUsage,
+  ThroughputSnapshot,
   CodexDeviceAuth,
   RequestLogFile,
   RequestLogPreview,
@@ -261,6 +262,8 @@ function createClient(base: string, key: string | undefined, fetcher: typeof glo
       request<NotificationSettings>('/notifications', 'PUT', settings, signal),
     testNotifications: (signal?: AbortSignal) =>
       request<void>('/notifications/test', 'POST', {}, signal),
+    getThroughput: (signal?: AbortSignal) =>
+      request<ThroughputSnapshot>('/throughput', 'GET', undefined, signal),
     getConfig: (signal?: AbortSignal) =>
       request<ManagementConfig>('/config', 'GET', undefined, signal),
     async getAuthFiles(signal?: AbortSignal): Promise<AuthFile[]> {

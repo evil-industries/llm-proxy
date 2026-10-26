@@ -797,6 +797,10 @@
   .logs-panel :global([data-slot='tabs-content']) {
     overflow: auto;
   }
+  .logs-panel :global([data-slot='tabs-content']) {
+    /* Keep filters reachable when the toolbar fills a short viewport. */
+    min-height: 128px;
+  }
   .logs-panel :global([data-slot='table-container']) {
     min-height: 128px;
   }

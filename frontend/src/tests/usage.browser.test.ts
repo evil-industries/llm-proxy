@@ -3,6 +3,7 @@ import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
 import UsagePanel from '$lib/components/management/UsagePanel.svelte';
 import ManagementApp from '$lib/components/ManagementApp.svelte';
+import { demoThroughput } from '$lib/demo';
 import { MockEventSource } from './realtime-fixture';
 const now = Date.now();
 const account = {
@@ -96,6 +97,7 @@ test('updates usage from push events, keeps one connection across navigation, an
   let used = '25';
   const fetcher = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
+    if (url.endsWith('/throughput')) return Response.json(demoThroughput);
     if (url.endsWith('/auth-files'))
       return Response.json({
         files: [
@@ -162,4 +164,32 @@ test('filters provider ledgers and reveals account emails on demand', async () =
   expect(document.querySelector('article')?.getAttribute('aria-label')).not.toContain(
     account.email
   );
+});
+
+test('searches credentials and sorts the matching ledger by remaining quota', async () => {
+  render(UsagePanel, {
+    files: [
+      account,
+      {
+        ...account,
+        name: 'more.json',
+        email: 'more@example.com',
+        quota: {
+          ...account.quota,
+          signals: { ...account.quota.signals, 'X-Codex-Secondary-Used-Percent': '10' }
+        }
+      }
+    ]
+  });
+  await page.getByRole('combobox', { name: 'Sort credentials' }).selectOptions('remaining');
+  expect(document.querySelector('article progress')?.getAttribute('value')).toBe('75');
+  await page.getByRole('button', { name: 'Show emails' }).click();
+  expect(document.querySelector('article')?.textContent).toContain('more@example.com');
+  await page.getByRole('textbox', { name: 'Search credentials' }).fill('TEAM@');
+  expect(document.querySelectorAll('article')).toHaveLength(1);
+  await expect.element(page.getByRole('heading', { name: 'team@example.com' })).toBeVisible();
+  await page.getByRole('textbox', { name: 'Search credentials' }).fill('missing');
+  await expect
+    .element(page.getByRole('status'))
+    .toHaveTextContent('No credentials match your search.');
 });

@@ -30,6 +30,12 @@ Deploy this frontend with the Go server from the same checkout: client API-key c
 
 The Go server needs a nonempty `remote-management.secret-key` or `MANAGEMENT_PASSWORD` environment variable. When Node connects from a different host or container, Go also needs `remote-management.allow-remote: true`; restrict access to its management port with private networking. Browser CORS configuration is unnecessary because browser requests stay on the console's origin.
 
+## Runtime throughput
+
+Overview and Quota management show anonymous throughput aggregates from this Go server's `/v0/management/throughput` endpoint. The console refreshes every five seconds while visible. Metrics cover completed upstream attempts in the last five minutes (or time since server startup during warmup); retries count as separate attempts. Aggregates are process-local, reset on restart, and do not consume the usage queue.
+
+Output throughput is successful generation output tokens per elapsed second. Generation speed uses streaming output tokens divided by reported generation time (total duration minus time to first token). Output counts include reasoning when reported by the provider. Timing averages use only valid provider measurements; unavailable timing displays an em dash. Failed attempts contribute to request rate, failures, and average total duration. Enable **Usage statistics** in Settings to collect these metrics.
+
 ## Authentication and configuration
 
 The console can use Authelia through OpenID Connect (OIDC).

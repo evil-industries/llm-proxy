@@ -5,6 +5,7 @@ import { managementFetch } from './management-fetch';
 
 const METHODS: Record<string, readonly string[]> = {
   config: ['GET'],
+  throughput: ['GET'],
   'auth-files': ['GET', 'POST', 'DELETE'],
   'auth-files/status': ['PATCH'],
   'api-keys': ['GET', 'PUT', 'PATCH', 'DELETE'],
