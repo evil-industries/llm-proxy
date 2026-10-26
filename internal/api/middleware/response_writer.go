@@ -235,6 +235,10 @@ func (w *ResponseWriterWrapper) captureCurrentHeaders() {
 		w.headers = make(map[string][]string)
 	}
 
+	if w.ResponseWriter == nil {
+		return // Background finalization uses the headers captured at handoff.
+	}
+
 	// Capture all current headers from the underlying ResponseWriter
 	for key, values := range w.ResponseWriter.Header() {
 		// Make a copy of the values slice to avoid reference issues
@@ -282,7 +286,11 @@ func (w *ResponseWriterWrapper) processStreamingChunks(done chan struct{}, chunk
 	}
 
 	for chunk := range chunks {
-		writer.WriteChunkAsync(chunk)
+		if ownedWriter, ok := writer.(interface{ WriteChunkOwned([]byte) }); ok {
+			ownedWriter.WriteChunkOwned(chunk)
+		} else {
+			writer.WriteChunkAsync(chunk)
+		}
 	}
 }
 

@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -65,7 +66,8 @@ func (l *FileRequestLogger) LogRequestWithOptionsAndAllSources(url, method strin
 }
 
 func (l *FileRequestLogger) logRequestWithSources(url, method string, requestHeaders map[string][]string, body []byte, statusCode int, responseHeaders map[string][]string, response, websocketTimeline []byte, websocketTimelineSource *FileBodySource, apiRequest []byte, apiRequestSource *FileBodySource, apiResponse []byte, apiResponseSource *FileBodySource, apiWebsocketTimeline []byte, apiWebsocketTimelineSource *FileBodySource, apiResponseErrors []*interfaces.ErrorMessage, force bool, requestID string, requestTimestamp, apiResponseTimestamp time.Time) error {
-	preserve := logarchive.Enabled()
+	l = l.Snapshot()
+	preserve := l.preserve || logarchive.Enabled()
 	completed := false
 	var pendingPath, requestBodyPath string
 	defer func() {
@@ -168,8 +170,9 @@ func (l *FileRequestLogger) logRequestWithSources(url, method string, requestHea
 	}
 
 	pendingPath = logFile.Name()
+	buffer := bufio.NewWriterSize(logFile, logSpoolBufferSize)
 	writeErr := l.writeNonStreamingLog(
-		logFile,
+		buffer,
 		url,
 		method,
 		requestHeaders,
@@ -191,6 +194,9 @@ func (l *FileRequestLogger) logRequestWithSources(url, method string, requestHea
 		requestTimestamp,
 		apiResponseTimestamp,
 	)
+	if errFlush := buffer.Flush(); writeErr == nil {
+		writeErr = errFlush
+	}
 	defer managementevents.Publish(managementevents.RequestLogs)
 	if writeErr == nil {
 		writeErr = logFile.Sync()
@@ -236,6 +242,7 @@ func (l *FileRequestLogger) logRequestWithSources(url, method string, requestHea
 //   - StreamingLogWriter: A writer for streaming response chunks
 //   - error: An error if logging initialization fails, nil otherwise
 func (l *FileRequestLogger) LogStreamingRequest(url, method string, headers map[string][]string, body []byte, requestID string) (StreamingLogWriter, error) {
+	l = l.Snapshot()
 	if !l.enabled {
 		return &NoOpStreamingLogWriter{}, nil
 	}
@@ -280,7 +287,7 @@ func (l *FileRequestLogger) newFileStreamingLogWriter(url, method string, header
 	writer := &FileStreamingLogWriter{
 		logFilePath:      filePath,
 		archiveDirectory: l.archiveDirectory,
-		preserve:         logarchive.Enabled(),
+		preserve:         l.preserve || logarchive.Enabled(),
 		homeEnabled:      l.homeEnabled,
 		requestID:        requestID,
 		url:              url,

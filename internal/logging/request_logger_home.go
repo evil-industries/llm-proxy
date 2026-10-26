@@ -81,12 +81,14 @@ func (l *FileRequestLogger) SetHomeEnabled(enabled bool) {
 	if l == nil {
 		return
 	}
+	l.settingsMu.Lock()
+	defer l.settingsMu.Unlock()
 	l.homeEnabled = enabled
 }
 
 type homeStreamingLogWriter struct {
 	// Keep the original directory owner when archival is enabled mid-request.
-	fileLogger      FileRequestLogger
+	fileLogger      *FileRequestLogger
 	fileWriter      *FileStreamingLogWriter
 	captureEnabled  bool
 	preserveLatched atomic.Bool
@@ -122,7 +124,7 @@ func newHomeStreamingLogWriter(logger *FileRequestLogger, captureEnabled bool, u
 	}
 
 	writer := &homeStreamingLogWriter{
-		fileLogger:     *logger,
+		fileLogger:     logger.Snapshot(),
 		captureEnabled: captureEnabled,
 		url:            url,
 		method:         method,
@@ -192,18 +194,23 @@ func (w *homeStreamingLogWriter) asyncWriter() {
 }
 
 func (w *homeStreamingLogWriter) WriteChunkAsync(chunk []byte) {
+	w.WriteChunkOwned(bytes.Clone(chunk))
+}
+
+// WriteChunkOwned accepts exclusive ownership of an already copied chunk.
+func (w *homeStreamingLogWriter) WriteChunkOwned(chunk []byte) {
 	if w == nil || len(chunk) == 0 {
 		return
 	}
 	if w.PreservingLogs() {
 		if errActivate := w.activateFileWriter(); errActivate == nil {
-			w.fileWriter.WriteChunkAsync(chunk)
+			w.fileWriter.WriteChunkOwned(chunk)
 			return
 		}
 		// Keep the captured bytes for another activation attempt and surface a
 		// persistent storage failure from Close; never drop a preserved chunk.
 		if w.chunkChan != nil {
-			w.chunkChan <- bytes.Clone(chunk)
+			w.chunkChan <- chunk
 		}
 		return
 	}
@@ -211,7 +218,7 @@ func (w *homeStreamingLogWriter) WriteChunkAsync(chunk []byte) {
 		return
 	}
 	select {
-	case w.chunkChan <- append([]byte(nil), chunk...):
+	case w.chunkChan <- chunk:
 	default:
 	}
 }

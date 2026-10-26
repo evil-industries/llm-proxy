@@ -31,6 +31,7 @@ type manager struct {
 	store       verifiedUploader
 	directories func() []string
 	registry    *directoryRegistry
+	compressor  *gzip.Writer
 }
 
 var lifecycle struct {
@@ -359,6 +360,8 @@ func (m *manager) archive(ctx context.Context, source string) error {
 	}
 	archivePath := source
 	archiveName := filepath.Base(source)
+	digest := sha256.New()
+	var archiveSize int64
 	if !strings.HasSuffix(source, ".gz") {
 		compressed, errCreate := os.CreateTemp(filepath.Dir(source), ".log-archive-*.tmp")
 		if errCreate != nil {
@@ -370,32 +373,45 @@ func (m *manager) archive(ctx context.Context, source string) error {
 				log.Warn("log archive: failed to remove compression staging file")
 			}
 		}()
-		writer := gzip.NewWriter(compressed)
-		_, errCopy := copyWithContext(ctx, writer, input)
-		errGzip := writer.Close()
-		errSync := compressed.Sync()
+		// Hash compressed bytes as they are written, avoiding a separate read.
+		output := io.MultiWriter(compressed, digest)
+		if m.compressor == nil {
+			m.compressor = gzip.NewWriter(output)
+		} else {
+			m.compressor.Reset(output)
+		}
+		_, errCopy := copyWithContext(ctx, m.compressor, input)
+		errGzip := m.compressor.Close()
+		info, errStat := compressed.Stat()
 		errClose := compressed.Close()
-		if errWrite := errors.Join(errCopy, errGzip, errSync, errClose); errWrite != nil {
+		// The original remains available until remote verification succeeds;
+		// this disposable compression staging file does not need an fsync.
+		if errWrite := errors.Join(errCopy, errGzip, errStat, errClose); errWrite != nil {
 			return errWrite
 		}
+		archiveSize = info.Size()
 		archiveName += ".gz"
-	}
-	archiveFile, errOpen := os.Open(archivePath)
-	if errOpen != nil {
-		return errOpen
-	}
-	digest := sha256.New()
-	_, errHash := copyWithContext(ctx, digest, archiveFile)
-	errClose := archiveFile.Close()
-	if errRead := errors.Join(errHash, errClose); errRead != nil {
-		return errRead
+	} else {
+		var errHash error
+		archiveSize, errHash = copyWithContext(ctx, digest, input)
+		if errHash != nil {
+			return errHash
+		}
 	}
 	if errCloseSource := input.Close(); errCloseSource != nil {
 		return errCloseSource
 	}
 	inputClosed = true
 	key := hex.EncodeToString(digest.Sum(nil)) + "/" + archiveName
-	if errUpload := m.store.UploadVerified(ctx, key, archivePath); errUpload != nil {
+	var errUpload error
+	if prepared, ok := m.store.(interface {
+		uploadPrepared(context.Context, string, string, int64) error
+	}); ok {
+		errUpload = prepared.uploadPrepared(ctx, key, archivePath, archiveSize)
+	} else {
+		errUpload = m.store.UploadVerified(ctx, key, archivePath)
+	}
+	if errUpload != nil {
 		return errUpload
 	}
 	// Never reclaim a replaced/changed source using a previous upload.

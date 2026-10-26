@@ -366,6 +366,7 @@ func (s *Service) Shutdown(ctx context.Context) error {
 			}
 		}
 
+		logging.WaitForRequestLogs()
 		logarchive.Stop()
 		usage.StopDefault()
 	})

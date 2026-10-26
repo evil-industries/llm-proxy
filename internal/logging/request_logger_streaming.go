@@ -1,9 +1,11 @@
 package logging
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -111,10 +113,15 @@ func (w *FileStreamingLogWriter) WriteChunkAsync(chunk []byte) {
 	if w.chunkChan == nil {
 		return
 	}
+	w.WriteChunkOwned(bytes.Clone(chunk))
+}
 
-	// Make a copy of the chunk to avoid data races
-	chunkCopy := make([]byte, len(chunk))
-	copy(chunkCopy, chunk)
+// WriteChunkOwned transfers an exclusively owned chunk without copying it again.
+// The caller must not access the chunk after this call.
+func (w *FileStreamingLogWriter) WriteChunkOwned(chunkCopy []byte) {
+	if w.chunkChan == nil {
+		return
+	}
 
 	// Archival must retain every captured chunk, applying disk backpressure.
 	if w.preservingLogs() {
@@ -273,7 +280,11 @@ func (w *FileStreamingLogWriter) Close() error {
 	}
 
 	pendingPath = logFile.Name()
-	writeErr := w.writeFinalLog(logFile)
+	buffer := bufio.NewWriterSize(logFile, logSpoolBufferSize)
+	writeErr := w.writeFinalLog(buffer)
+	if errFlush := buffer.Flush(); writeErr == nil {
+		writeErr = errFlush
+	}
 	if writeErr == nil {
 		writeErr = logFile.Sync()
 	}
@@ -314,11 +325,12 @@ func (w *FileStreamingLogWriter) Close() error {
 func (w *FileStreamingLogWriter) asyncWriter() {
 	defer close(w.closeChan)
 
+	buffer := bufio.NewWriterSize(w.responseBodyFile, logSpoolBufferSize)
 	for chunk := range w.chunkChan {
 		if w.responseBodyFile == nil {
 			continue
 		}
-		if _, errWrite := w.responseBodyFile.Write(chunk); errWrite != nil {
+		if _, errWrite := buffer.Write(chunk); errWrite != nil {
 			select {
 			case w.errorChan <- errWrite:
 			default:
@@ -336,6 +348,12 @@ func (w *FileStreamingLogWriter) asyncWriter() {
 	if w.responseBodyFile == nil {
 		return
 	}
+	if errFlush := buffer.Flush(); errFlush != nil {
+		select {
+		case w.errorChan <- errFlush:
+		default:
+		}
+	}
 	if errClose := w.responseBodyFile.Close(); errClose != nil {
 		select {
 		case w.errorChan <- errClose:
@@ -345,7 +363,7 @@ func (w *FileStreamingLogWriter) asyncWriter() {
 	w.responseBodyFile = nil
 }
 
-func (w *FileStreamingLogWriter) writeFinalLog(logFile *os.File) error {
+func (w *FileStreamingLogWriter) writeFinalLog(logFile io.Writer) error {
 	if errWrite := writeRequestInfoWithBody(logFile, w.url, w.method, w.requestHeaders, nil, w.requestBodyPath, w.timestamp, "http", inferUpstreamTransport(w.apiRequest, w.apiRequestSource, w.apiResponse, w.apiResponseSource, w.apiWebsocketTimeline, nil, nil), true); errWrite != nil {
 		return errWrite
 	}
