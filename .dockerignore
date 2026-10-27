@@ -21,8 +21,26 @@ logs
 conv
 config.yaml
 
-# The Go image does not use the frontend or its private deployment data.
-/frontend
+# Build static assets, never copy frontend runtime data or local dependencies.
+/frontend/node_modules
+/frontend/build
+/frontend/.svelte-kit
+/frontend/.garden*
+/frontend/test-results
+/frontend/.vitest-attachments
+/frontend/output
+/frontend/.playwright-cli
+/frontend/deploy/data
+/frontend/.env
+/frontend/.env.*
+# Private fleet/runtime inputs must never enter a build layer.
+/backend.env
+/console.env
+/runtime
+/provider-accounts
+**/*.env
+**/.env
+**/.env.*
 .env
 .env.*
 

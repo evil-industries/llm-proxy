@@ -1,121 +1,60 @@
 # Management frontend
 
-A SvelteKit 2 / Svelte 5 management console built with shadcn-svelte and Tailwind CSS 4. It manages provider credentials, client API keys, routing and logging settings, and server logs. A Node server authenticates users and forwards management requests to a private Go backend.
+The custom SvelteKit 2 / Svelte 5 console is a **static SPA**. The same Go service serves its assets, authenticates operators, and exposes its scoped management API. Node.js is needed only to develop/build the assets. The default deployment is **one Go container**, behind Traefik's TLS termination, with no Caddy or Node runtime. The merged dashboard, live throughput, settings, credential management, log inspection and archival behavior are retained.
 
-## Develop
-
-Use Node.js 22.12+ and npm:
+## Build and develop
 
 ```sh
 cd frontend
 npm ci
-cp .env.example .env
+npm run build
+npm run test:static
 ```
 
-Generate a console password hash. Enter a password of at least 12 characters when prompted; input is hidden:
+The deployable output is `frontend/build/`, including `index.html` and `/_app/immutable/` assets. Build it without production environment files or secrets.
 
-```sh
-node scripts/hash-password.mjs
-```
+For a local Go-served console, configure the Go process with `CONSOLE_ENABLED=true`, `CONSOLE_STATIC_DIR=frontend/build`, `ORIGIN=http://127.0.0.1:8317`, `AUTH_MODE=password` and `AUTH_PASSWORD_HASH`. Generate a compatible hash with `cd frontend && npm run auth:hash` (interactive input is hidden). Run `go run ./cmd/server --config <private-config.yaml> --local-model` from the project root and open the origin. A Go-only binary build does not automatically compile the assets.
 
-Paste the resulting hash into `AUTH_PASSWORD_HASH` in `.env`, retaining the single quotes. Set `PRIVATE_MANAGEMENT_KEY` to the Go server's management key and `PRIVATE_MANAGEMENT_URL` to its private base URL. The console password is separate from both the management key and client API keys.
+For Vite development, run Go on 8317 with `ORIGIN=http://127.0.0.1:5173` and `npm run dev` from `frontend/`. Vite forwards `/api` and `/auth` to Go, preserving the browser Host. Set server variables on the Go process or in its root `.env`; a frontend `.env` is not a server configuration anymore. OIDC requires a reachable HTTPS origin/callback and trusted HTTPS issuer.
 
-```sh
-npm run dev
-```
+## Authentication and scope
 
-Open `http://localhost:5173` and sign in at `/login`. Keep `ORIGIN` equal to the address used in your browser. Plain HTTP session cookies are supported during local development; production requires HTTPS.
+`CONSOLE_ENABLED=true` opts into the custom console. Without it, the existing upstream-compatible API/control-panel behavior is unchanged. Set these **runtime server variables**, never `VITE_*` or public build variables:
 
-Deploy this frontend with the Go server from the same checkout: client API-key changes use its atomic `/v0/management/api-keys/mutate` endpoint. Older servers will reject those changes.
+| Variable                               | Purpose                                                                                                   |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `CONSOLE_ENABLED`                      | `true` enables the console and local-only legacy management guard.                                        |
+| `CONSOLE_STATIC_DIR`                   | Public build directory; Docker defaults to `/CLIProxyAPI/console`, source runs to `frontend/build`.       |
+| `ORIGIN`                               | Exact public HTTPS origin, e.g. `https://llm.rose.sh`; HTTP is accepted only on loopback for development. |
+| `AUTH_MODE`                            | `password` (default) or `oidc`.                                                                           |
+| `AUTH_PASSWORD_HASH`                   | Existing `scrypt$131072$8$1$...` password hash; required only in password mode.                           |
+| `OIDC_ISSUER`                          | HTTPS issuer, e.g. `https://auth.rose.sh`.                                                                |
+| `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | Confidential OIDC client credentials; required in OIDC mode.                                              |
+| `OIDC_ALLOWED_USERS`                   | Comma-separated, case-sensitive `preferred_username` allowlist; required in OIDC mode.                    |
 
-The Go server needs a nonempty `remote-management.secret-key` or `MANAGEMENT_PASSWORD` environment variable. When Node connects from a different host or container, Go also needs `remote-management.allow-remote: true`; restrict access to its management port with private networking. Browser CORS configuration is unnecessary because browser requests stay on the console's origin.
+Go handles authorization-code exchange with S256 PKCE, state and nonce checks, RS256 signature/issuer/audience/expiry validation, and subject-bound UserInfo username authorization. OIDC mode never falls back to password login. Login transactions expire after ten minutes and are one-use and browser-bound. Client secrets, provider tokens, PKCE verifiers and flow identifiers never reach the browser. See [Authelia setup](deploy/AUTHELIA.md).
+
+Successful login issues an opaque, host-only, eight-hour cookie with `HttpOnly`, `SameSite=Lax`, `Path=/`, and HTTPS `Secure`/`__Host-` attributes. Go holds only hashed session handles; logout and expiry revoke in-flight console requests/SSE and cancel pending device login. Sessions and OIDC transactions are memory-only and lost on restart. Run one replica; there is no shared session store. Configuration/secret rotation requires a restart. Logout ends this console session; it does not end the Authelia SSO session.
+
+Writes require the exact `Origin`; Host validation uses configured `ORIGIN`, never caller-supplied forwarded headers. Login bodies are capped at 4 KiB. Password checks, login attempts, sessions and transactions are bounded. Login throttling uses the TCP peer, so users behind one Traefik share its five-attempt/15-minute bucket; arbitrary `X-Forwarded-For` cannot bypass it. Successful login resets that peer's counter.
+
+The authenticated `/api/management/*` surface retains the console's explicit method/path/query allowlist. It cannot access raw YAML, provider-key configuration, provider-file downloads, arbitrary API calls, plugins or the destructive usage queue. Config reads expose only UI settings; account reads omit filesystem paths, provider tokens and extension metadata. Intentional client API-key management still returns those keys to authorized operators. Logs and archives can contain prompts, responses and diagnostic secrets; access remains restricted to authenticated operators.
+
+The legacy `/v0/management` API and its schemas remain unchanged. With the console enabled, an outer guard permits those routes only to direct loopback callers without forwarding headers; the existing management-key requirement remains. Remote raw-management access and `/management.html` are blocked even if a legacy `MANAGEMENT_PASSWORD` is present. The console dispatches its restricted operations in-process and requires neither that password nor `PRIVATE_MANAGEMENT_URL`/`PRIVATE_MANAGEMENT_KEY`. Leave `remote-management.allow-remote: false`; disable the old control-panel download. Home mode does not expose the custom console.
+
+## One-container production and migration
+
+Use [the migration runbook](deploy/STATIC-CONSOLE.md) for the exact `backend.env` + `console.env` + `runtime/config.yaml` + provider-account volume migration, ARM64 build, routing and acceptance commands. No production files are copied or modified by the build. The repository root `Dockerfile` builds both assets and Go and copies only static files and the Go binary into Debian. The `frontend/Dockerfile`, Node `server.mjs`, two-container console service, and Caddy configuration are retired.
+
+`frontend/compose.yaml` is a one-service example. It binds only `127.0.0.1:8317` by default. For Traefik on a Docker network, connect this service to that existing network and target container port 8317 instead of publishing it. Preserve existing volume identities and mount paths when adapting the example; a newly named volume would be empty.
+
+## External plain HTTP static server (optional)
+
+Go serving the SPA and API on one origin is the default. To serve assets from nginx or another plain HTTP server, publish **only `frontend/build/`** as its document root and use an SPA fallback to `/index.html` for navigation (missing `/_app/*` must still return 404). Send `/api/session`, `/api/management/*`, `/api/codex/device-auth`, and `/auth/oidc/*` to the Go service with the original Host, under the **same public HTTPS origin**. Traefik can route these paths directly to Go. Inference and `/healthz` also go to Go. Keep `CONSOLE_ENABLED=true` and the same auth environment on Go; the static server gets no secrets. Never serve the checkout, `.svelte-kit`, runtime config, auth or log directories. Cross-origin SPA/API deployment is not supported.
 
 ## Runtime throughput
 
-Overview and Quota management show anonymous throughput aggregates from this Go server's `/v0/management/throughput` endpoint. The console refreshes every five seconds while visible. Metrics cover completed upstream attempts in the last five minutes (or time since server startup during warmup); retries count as separate attempts. Aggregates are process-local, reset on restart, and do not consume the usage queue.
-
-Output throughput is successful generation output tokens per elapsed second. Generation speed uses streaming output tokens divided by reported generation time (total duration minus time to first token). Output counts include reasoning when reported by the provider. Timing averages use only valid provider measurements; unavailable timing displays an em dash. Failed attempts contribute to request rate, failures, and average total duration. Enable **Usage statistics** in Settings to collect these metrics.
-
-## Authentication and configuration
-
-The console can use Authelia through OpenID Connect (OIDC).
-Set `AUTH_MODE=oidc` to use Authelia only. This mode rejects console passwords.
-See the [Authelia deployment instructions](deploy/AUTHELIA.md) for the `llm.rose.sh` configuration and access policy.
-The password instructions below apply to the default `AUTH_MODE=password` configuration.
-
-| Variable                      | Purpose                                                                                                                      |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `AUTH_PASSWORD_HASH`          | Scrypt hash generated by `scripts/hash-password.mjs`; never use a plaintext password here.                                   |
-| `PRIVATE_MANAGEMENT_URL`      | Fixed, server-only Go base URL, such as `http://cli-proxy-api:8317`.                                                         |
-| `PRIVATE_MANAGEMENT_KEY`      | Server-only bearer key for the Go management API.                                                                            |
-| `ORIGIN`                      | Exact public origin, such as `https://management.example.com`; required HTTPS in production.                                 |
-| `BODY_SIZE_LIMIT`             | Set to `Infinity` to disable the Node request-size limit for authenticated management uploads.                               |
-| `ADDRESS_HEADER`, `XFF_DEPTH` | Use `x-forwarded-for` and the trusted proxy depth for client-address login throttling; bundled Caddy normalizes this to `1`. |
-| `HOST`, `PORT`                | Node listening address and port; the container uses `0.0.0.0:3000`.                                                          |
-
-The browser sends the console password to `POST /api/session`. A successful login creates an opaque, eight-hour session cookie with `HttpOnly`, `SameSite=Lax`, and production `Secure` attributes. Logout revokes the session. Every `/api/management` request requires a valid session; Node attaches the backend management key itself. The browser cannot select an upstream URL or supply the backend management key.
-
-Authenticated management requests and responses have no application payload-size cap; uploads stream to the Go backend. The supplied Node configuration disables its request-size cap; request handling at the public edge belongs to your existing reverse proxy. The unauthenticated login endpoint retains its small input limit and sign-in throttling.
-
-Sessions live in one Node process and are lost on restart. Run a single instance; horizontal scaling requires a shared session store. No browser localStorage or sessionStorage is used for credentials. Keep environment files private and outside version control; Docker excludes them from the image build context.
-
-Password mode uses a shared operator password. Password hashes use salted scrypt with N=131072, r=8, p=1, following the [OWASP scrypt baseline](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html#scrypt). Sign-in attempts and concurrent password verification are bounded. Password rotation requires generating a new hash and restarting the Node process, which also invalidates existing sessions.
-
-## Production with Node
-
-```sh
-npm ci
-npm run build
-NODE_ENV=production HOST=127.0.0.1 PORT=3000 ADDRESS_HEADER=x-forwarded-for node --env-file=.env server.mjs
-```
-
-Before starting, set `.env` to your production values, including `ORIGIN=https://management.example.com`. The production application rejects missing or non-HTTPS `ORIGIN` values, and always issues secure session cookies; only the development server permits HTTP cookies. Alternatively, inject the variables through your process manager and run `npm start`. Production does not automatically load `.env`; Node's `--env-file` flag loads it explicitly. Deploy `build/`, `server.mjs`, `package.json`, `package-lock.json`, and production dependencies installed with `npm ci --omit=dev --ignore-scripts`. Use `server.mjs` to allow long-running uploads while retaining the adapter's header deadline and graceful shutdown. See [SvelteKit's Node deployment documentation](https://svelte.dev/docs/kit/adapter-node).
-
-For a standalone Node deployment, route the console hostname to Node through your HTTPS reverse proxy and keep the Go management API private. Configure trusted forwarded headers to match that proxy chain. Node does not proxy inference requests; route those directly to Go through a separate restricted ingress, or use the bundled Compose deployment below.
-
-This is a server application, not a static SPA. The Go `/management.html` handler cannot host it. Do not copy the build into `MANAGEMENT_STATIC_PATH`; `vite preview` is only for local inspection.
-
-## Production with Docker Compose
-
-[compose.yaml](compose.yaml) runs three containers: **Caddy**, the **Node management console**, and the **Go gateway**, built from this checkout. Your main reverse proxy terminates HTTPS and forwards the project's entire hostname to Caddy's one HTTP port. The Caddy container handles all project-specific routing using [deploy/Caddyfile](deploy/Caddyfile).
-
-```text
-HTTPS clients → your main reverse proxy → Caddy container :8080
-                                           ├─ inference → Go :8317
-                                           └─ console   → Node :3000 → private Go management API
-```
-
-From a fresh checkout, use Node.js 22.12+ for the one-time setup command (no npm install required), and Docker with Compose for the stack:
-
-```sh
-cd frontend
-node scripts/setup-compose.mjs https://gateway.example.com
-docker compose config --quiet
-docker compose up --build -d
-```
-
-Replace the example origin with the hostname your main proxy will expose. Setup prompts for the console password with hidden input, generates separate random management and inference keys, and creates private `frontend/.env` and `frontend/deploy/data/config/config.yaml` files. It refuses to overwrite existing files. If you already have a development `.env`, move it aside before setup; keep any existing deployment configuration and credentials when migrating an installation.
-
-Configure one upstream in your main proxy: forward **all paths** for that hostname to `http://127.0.0.1:8080` when the proxy runs on the Docker host. Preserve the incoming Host and Authorization headers, forward client addresses, and support streaming and WebSocket upgrades. Caddy does not request certificates or redirect HTTP here; public TLS remains with your main proxy.
-
-The host port binds to loopback by default. If your main proxy runs on another machine or in another container, set `GATEWAY_BIND_ADDRESS` in `.env` to a private host interface reachable by it, then point the proxy at that address. Restrict access to this HTTP port to your proxy. `GATEWAY_PORT` changes the published port. Alternatively, attach the Caddy service to your main proxy's existing Docker network through a Compose override and use `caddy:8080` as the upstream. Neither Node nor Go publishes a host port.
-
-Set `CADDY_TRUSTED_PROXIES` in `.env` to the actual source IP/CIDRs of your main proxy, space-separated. For a host proxy connecting through Docker's published port, this is often a Docker bridge gateway address, **not** loopback; determine it from your Docker network and deployment. Trust only those proxy sources. Without this setting, forwarded client addresses from non-loopback sources are ignored and logins share the proxy's address for throttling. Caddy parses trusted chains from right to left and replaces the upstream `X-Forwarded-For` with one client address, so Node's `XFF_DEPTH` is fixed at `1`. See [Caddy's trusted-proxy settings](https://caddyserver.com/docs/caddyfile/options#trusted-proxies).
-
-Once started:
-
-- Open `https://gateway.example.com` and sign in with the console password. Select **Connect Codex account** on Overview or Credentials, then approve the device code with your ChatGPT account. Other provider credential files can be imported through Credentials.
-- Use `https://gateway.example.com/v1` as the OpenAI-compatible client base URL. The initial client API key is in `deploy/data/config/config.yaml` under `api-keys`; manage further keys in the console.
-- Caddy also forwards `/v1beta/*`, `/openai/v1/*`, and `/backend-api/codex/*` directly to Go, preserving client authorization, SSE streams, and WebSocket upgrades. Raw `/v0/*` and `/management.html` requests are blocked. Console management calls use the authenticated `/api/management` relay.
-- Codex device authentication works through the console without public OAuth callback ports. Other provider-specific OAuth callbacks and additional integration routes are not publicly exposed; import credentials obtained with the gateway's existing authentication tools, or deliberately add the required callback routes for those flows.
-
-The Go configuration directory is writable and persists across container recreation; mounting the directory also supports tools that replace configuration files atomically. Provider credentials, logs, and plugins use named Docker volumes. The gateway drains active device-authentication commits within a fresh 30-second shutdown grace; Compose allows 35 seconds before forcing container exit. Back up these volumes together with `.env` and `deploy/data/config`; `docker compose down` preserves them, while `down --volumes` deletes named volumes. Runtime files are excluded from version control and both image build contexts. The bridge network allows outbound provider and ntfy connections. Setup enables in-memory usage accounting for dashboard activity; full request logging remains disabled.
-
-Keep at least one inference key configured: an empty Go `api-keys` list disables its API-key authentication. Setup enables WebSocket authentication as well. The internal management key is shared only between Node and Go through environment variables. The console password, management key, and inference keys serve separate purposes. Sessions remain in memory and are invalidated when the Node container restarts; this stack does not yet implement the proposed conversation database or persistent session store.
-
-Keep password hashes in single quotes in `.env`; Compose otherwise interprets dollar signs during interpolation. Setup handles this quoting. `docker compose config` without `--quiet` prints resolved secrets, so avoid copying its output into logs or issues. See [Docker's environment-file syntax](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/).
-
-To update, pull the desired checkout and run `docker compose up --build -d` from `frontend/`. Inspect startup failures with `docker compose logs --tail=100`. The repository-root Compose file is a separate, Go-only deployment; use `frontend/compose.yaml` for this complete stack.
+Overview and quota management retain their live throughput snapshots every five seconds while visible. Metrics cover completed upstream attempts in the last five minutes (or startup warmup); retries count separately. Aggregates are process-local, reset on restart, and never consume the usage queue. Generation speed uses streaming output tokens divided by generation time; unavailable timings display an em dash. Enable Usage statistics in Settings to collect metrics.
 
 ## Connect a Codex subscription
 
@@ -127,7 +66,7 @@ Device authentication is the primary account setup flow. On a fresh gateway, Ove
 
 Device code authentication must be enabled in your ChatGPT security settings or by your workspace administrator. The account must have access to Codex. See the [official authentication documentation](https://learn.chatgpt.com/docs/auth).
 
-Device-login status changes arrive through the same SSE connection. The local expiry countdown does not make network requests. You can cancel a pending attempt, request another code after expiry, and connect additional accounts. Reloading the page or returning to Credentials resumes the pending attempt within the same console session. The gateway performs approval polling even while the page is closed; cancelling UI requests does not cancel account setup. Explicit cancellation or logout cancels a pending flow, unless credential saving has already completed. A Node restart loses the console session and its pending-flow association; a Go restart ends pending flows. Saved credentials persist across both restarts.
+Device-login status changes arrive through the same SSE connection. The local expiry countdown does not make network requests. You can cancel a pending attempt, request another code after expiry, and connect additional accounts. Reloading the page or returning to Credentials resumes the pending attempt within the same console session. The gateway performs approval polling even while the page is closed; cancelling UI requests does not cancel account setup. Explicit cancellation or logout cancels a pending flow, unless credential saving has already completed. A Go restart loses console sessions and pending flows. Saved credentials persist in the auth volume.
 
 The approval link always points to OpenAI's device approval page. Private device identifiers, token exchange values, and provider tokens remain server-side. Browser requests use `/api/codex/device-auth`, bound to the authenticated operator session; the backend flow identifier is never returned to the browser. Codex credential files are written with owner-only permissions.
 
@@ -171,22 +110,24 @@ Primitives and charts in `src/lib/components/ui/` follow [shadcn-svelte](https:/
 ## Validation
 
 ```sh
+npm ci
 npx playwright install chromium
 npm run check
-npm run garden:check
-npm test
+npm run test:unit
+npm run test:browser
 npm run build
-npm run test:server
-npm run test:oidc # requires openssl; uses a local HTTPS identity provider
-npm run deploy:test
-npm run test:proxy # requires a local Caddy 2.11+ binary; CADDY_BIN can select it
+npm run test:static
+# From the project root:
+go test ./...
+go test -race ./internal/console ./internal/api ./internal/api/handlers/management
+go build -o test-output ./cmd/server && rm test-output
 ```
 
-Vitest runs server and API contract tests in Node, and component/interaction tests in real Chromium with its [Playwright browser provider](https://vitest.dev/guide/browser/). Layout checks use actual element geometry at narrow and wide viewports, including long content and enlarged text. Accessibility and keyboard checks complement overflow and clipping assertions; human visual review is still useful.
+Go tests exercise real TLS OIDC discovery, signature/audience/issuer/expiry/nonce validation, PKCE and client authentication, username and subject checks, one-use browser-bound callbacks, logout and expiry, CSRF, upload streaming, console route restrictions, account/config secret filtering, log/archive downloads, SSE revocation, and WebSocket/inference pass-through. Server integration tests exercise the actual management handlers and persistence with temporary configuration and credentials. They do not contact production services.
 
-`npm run test:compose` builds and starts an isolated Docker Compose stack, checks real authentication, management isolation, configuration and provider-credential persistence across restart, Codex device approval through a local HTTPS provider fixture, request-log preview/download, and JSON/SSE inference against a local mock provider, then removes its own test containers and volumes. It requires Docker and a host `openssl` executable, and never uses your deployment credentials or provider accounts. Set `COMPOSE_TEST_SKIP_BUILD=1` to reuse images already built by this test. This smoke test does not verify your external HTTPS reverse proxy or live provider credentials.
+Vitest keeps the API contracts and Chromium component, layout, accessibility, settings, credentials, notifications, logs, archive, and throughput tests. The static-output check requires the SPA fallback and immutable assets, rejects Node/server entrypoints and server environment markers, and checks supplied dummy secret values for accidental inclusion. SvelteKit's temporary `.svelte-kit/output/server` directory is a build intermediate and is never shipped; only `frontend/build/` is public.
 
-`npm run test:unit` and `npm run test:browser` run suites independently. Use `npm run format` / `npm run format:check` for formatting.
+The obsolete adapter-node, Node server/relay tests, Caddy and two-runtime Compose setup/smoke scripts have been replaced by Go tests and the single-container packaging. `garden:check` remains available for story coverage; some existing dashboard and primitive components still lack stories.
 
 ## API behavior
 
@@ -195,8 +136,6 @@ Vitest runs server and API contract tests in Node, and component/interaction tes
 - Data refresh is explicit. Section failures remain visible and preserve previously loaded data with a stale-data notice.
 - Credential and client-key deletion require in-page confirmation. The final client API key cannot be deleted from the console, preserving API authentication. Client-key changes are atomic and identify the key in the request body. Mutations await a fresh server read after success, including when another refresh is already running.
 - Codex device authentication is available directly in the console. Other provider OAuth flows, provider API-key configuration, plugin administration, and raw YAML editing remain available through existing management tools.
-
-GitHub Actions workflows are removed. Run the commands above locally to check types, story coverage, formatting, tests, the Node build, credential bootstrap, and Caddy routing. The proxy smoke test uses the production Caddyfile against local mock servers to check route isolation, forwarded addresses, uploads, streaming, and WebSocket upgrades. The built-server smoke test also verifies the real HTTP auth gate, secure session cookie, authenticated upstream relay, cross-origin write rejection, and logout revocation. The repository's required Go compile check remains `go build -o test-output ./cmd/server && rm test-output`.
 
 ### Live usage and account updates
 

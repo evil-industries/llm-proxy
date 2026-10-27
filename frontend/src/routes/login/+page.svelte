@@ -1,7 +1,7 @@
 <script lang="ts">
   import LoginPanel from '$lib/components/LoginPanel.svelte';
   import type { PageData } from './$types';
-  let { data }: { data: PageData } = $props();
+  let { data }: { data: Pick<PageData, 'oidc' | 'initialError'> } = $props();
 </script>
 
 <svelte:head><title>Sign in</title><meta name="robots" content="noindex,nofollow" /></svelte:head>

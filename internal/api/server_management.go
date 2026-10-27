@@ -283,6 +283,10 @@ func (s *Server) pluginManagementNoRoute(c *gin.Context) {
 		return
 	}
 	if path != "/v0/management" && !strings.HasPrefix(path, "/v0/management/") {
+		if s.console != nil && s.console.Fallback(c.Writer, c.Request) {
+			c.Abort()
+			return
+		}
 		c.AbortWithStatus(http.StatusNotFound)
 		return
 	}

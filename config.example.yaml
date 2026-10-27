@@ -11,6 +11,11 @@ tls:
   cert: ""
   key: ""
 
+# Optional custom static console (runtime environment, not YAML):
+# CONSOLE_ENABLED=true, CONSOLE_STATIC_DIR=/CLIProxyAPI/console, ORIGIN=https://llm.example.com
+# Configure AUTH_MODE=password + AUTH_PASSWORD_HASH, or AUTH_MODE=oidc + OIDC_* on Go.
+# It needs no remote management key. See frontend/deploy/STATIC-CONSOLE.md.
+
 # Management API settings
 remote-management:
   # Whether to allow remote (non-localhost) management access.

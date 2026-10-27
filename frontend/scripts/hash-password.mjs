@@ -2,7 +2,7 @@ import { randomBytes, scrypt as scryptCallback } from 'node:crypto';
 import { promisify } from 'node:util';
 import { createInterface } from 'node:readline';
 import { Writable } from 'node:stream';
-import { SCRYPT_OPTIONS, SCRYPT_PREFIX } from '../src/lib/server/password-params.js';
+import { SCRYPT_OPTIONS, SCRYPT_PREFIX } from './password-params.js';
 
 const scrypt = promisify(scryptCallback);
 let password;
