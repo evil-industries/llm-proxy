@@ -316,3 +316,7 @@ This is a tool built with Tauri 2 + Vue 3 for managing multiple OpenAI Codex des
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Custom static management console
+
+This fork includes a static Svelte management console served by the Go proxy in a single container. Node.js is required only to build frontend assets. See [frontend/README.md](frontend/README.md) for configuration and [the ARM64/AMD64 migration runbook](frontend/deploy/STATIC-CONSOLE.md) for Traefik routing, OIDC, and existing data-volume migration. The console is enabled with `CONSOLE_ENABLED=true`; the upstream-compatible APIs retain their existing behavior when disabled.

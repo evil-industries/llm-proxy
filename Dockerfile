@@ -1,3 +1,11 @@
+# Node is a build-time dependency only. Buildx selects native ARM64/AMD64 stages.
+FROM node:24-bookworm-slim AS console-builder
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --ignore-scripts
+COPY frontend/ ./
+RUN npx svelte-kit sync && npm run build && npm run test:static
+
 FROM golang:1.26-bookworm AS builder
 
 WORKDIR /app
@@ -25,12 +33,14 @@ RUN mkdir /CLIProxyAPI
 COPY --from=builder ./app/CLIProxyAPI /CLIProxyAPI/CLIProxyAPI
 
 COPY config.example.yaml /CLIProxyAPI/config.example.yaml
+COPY --from=console-builder /frontend/build /CLIProxyAPI/console
 
 WORKDIR /CLIProxyAPI
 
 EXPOSE 8317
 
-ENV TZ=Asia/Shanghai
+ENV TZ=Asia/Shanghai \
+    CONSOLE_STATIC_DIR=/CLIProxyAPI/console
 
 RUN cp /usr/share/zoneinfo/${TZ} /etc/localtime && echo "${TZ}" > /etc/timezone
 

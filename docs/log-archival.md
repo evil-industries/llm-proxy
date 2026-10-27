@@ -61,6 +61,19 @@ archival. Uploading and verification stream bytes with bounded memory.
 Compression needs temporary disk space. Failed uploads or failed integrity checks
 leave the source log available for retry, including after a restart.
 
+Capture batches small writes into 32 KiB buffers and keeps append files open;
+WebSocket events share spool files instead of creating a file per event. Final
+assembly, file syncing, and Home forwarding for archival requests normally run
+after response handling in at most eight background tasks. Shutdown drains accepted finalization tasks.
+If all eight slots are occupied, finalization runs synchronously to preserve logs
+without accumulating an unbounded queue of request bodies. Direct SDK logger calls
+and non-archival requests remain synchronous. A process crash can lose bytes still
+in capture queues or write buffers; orphan recovery preserves the bytes that reached local files.
+
+The archive worker reuses its gzip compressor and copy buffers, calculates the
+compressed digest during compression, and avoids syncing disposable compression
+staging files. Full remote readback verification still precedes source deletion.
+
 Failed request publication queues closed request bodies, log fragments, and
 unfinished log files for recovery on the next archive scan. After a restart,
 recognized orphaned files are recovered too. These separately downloadable
@@ -73,6 +86,10 @@ chunks in both capture queues. Home streams also switch to a local archive spool
 including when Home is unavailable. The request keeps that preservation policy
 through finalization even if archival is disabled again. Bytes dropped before archival
 was enabled cannot be recovered.
+
+Buffered capture reduces filesystem work but does not remove backpressure if the
+staging disk remains slower than incoming traffic. Archival prioritizes retaining
+captured content over dropping chunks during sustained storage stalls.
 
 While archival is enabled, `logs-max-total-size-mb`, `error-logs-max-files`, and
 the management clear-logs action cannot discard unarchived history. No archive

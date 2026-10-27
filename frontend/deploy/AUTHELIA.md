@@ -34,40 +34,26 @@ The console also requires an exact username match from the verified UserInfo res
 
 ## Configure llm.rose.sh
 
-Set these values in the private environment file for the management container:
+Set these runtime values on the **single Go service** (never during the asset build):
 
 ```dotenv
+CONSOLE_ENABLED=true
+CONSOLE_STATIC_DIR=/CLIProxyAPI/console
 AUTH_MODE=oidc
 ORIGIN=https://llm.rose.sh
 OIDC_ISSUER=https://auth.rose.sh
 OIDC_CLIENT_ID=llm-proxy-management
-OIDC_CLIENT_SECRET='REPLACE_WITH_PRIVATE_CLIENT_SECRET'
+OIDC_CLIENT_SECRET=REPLACE_WITH_PRIVATE_CLIENT_SECRET
 OIDC_ALLOWED_USERS=julius
 ```
 
-Keep `PRIVATE_MANAGEMENT_URL` and `PRIVATE_MANAGEMENT_KEY` at their existing values.
-Remove `AUTH_PASSWORD_HASH` from this deployment's environment file.
-The console rejects password sign-in in OIDC mode, even if an old hash remains configured.
-Missing OIDC settings cause authentication to fail. They do not enable password authentication.
+Keep the existing confidential client registration and exact callback URL. Remove the old `PRIVATE_MANAGEMENT_URL` and `PRIVATE_MANAGEMENT_KEY` relay variables; Go no longer needs a console-to-backend key. `AUTH_PASSWORD_HASH` is unnecessary in OIDC mode. Missing OIDC settings fail closed and never enable password authentication.
 
-For alpha-one, the management environment file is `/opt/llm-proxy/console.env` on virtual machine (VM) 201.
-The existing Compose service reads that file with `format: raw`.
-In a raw environment file, write the client secret without surrounding quotes.
-Build the management image from this change before you recreate the management container.
-Use the existing release procedure to preserve the backend image, configuration, credentials, and volumes.
-
-For the bundled Compose deployment, set these variables in `frontend/.env`.
-The Compose file passes them to the management container.
-Existing password deployments continue to use `AUTH_MODE=password` by default.
+See [STATIC-CONSOLE.md](STATIC-CONSOLE.md) before migrating existing environment files, config mounts and provider-account volumes. Preserve each environment file's parsing rules: Compose `format: raw` does not strip quotes, so existing raw files must contain unquoted values. Never source private environment files as shell scripts.
 
 ## Routing and verification
 
-Keep the current Traefik route from `llm.rose.sh` to Caddy.
-Caddy sends `/auth/oidc/*`, `/login`, and console requests to the management container.
-Do not apply Authelia forward-auth to the complete hostname.
-Inference routes retain their application programming interface (API) key authentication.
-Direct `/v0/*` management routes remain blocked.
-The management server never trusts `Remote-User` or other caller-supplied identity headers.
+Route `llm.rose.sh` directly from Traefik to Go on container port 8317, preserving Host. Go serves the static console, `/auth/oidc/*`, `/login` and its authenticated API. No Caddy or Node service is required. Do not apply Authelia forward-auth to the complete hostname: inference retains its API-key authentication. Remote `/v0/*` and `/management.html` are blocked by Go with the console enabled. Caller-supplied identity headers are never trusted.
 
 After deployment:
 
@@ -97,7 +83,7 @@ Console logout revokes the local session and cancels a pending sign-in from that
 It does not sign the user out of Authelia or other applications.
 A later sign-in can reuse the active Authelia session.
 Authelia account changes do not immediately revoke existing console sessions.
-To revoke all console sessions after an access change, restart the management container.
+To revoke all console sessions after an access change, restart the Go container.
 
 Run one management instance. Sessions and pending sign-ins are held in process memory.
 A restart cancels both. Multiple instances require a shared session store.

@@ -270,6 +270,7 @@ func publishClosedApplicationLog(path string) error {
 }
 
 func closeLogOutputs() {
+	WaitForRequestLogs()
 	writerMu.Lock()
 	defer writerMu.Unlock()
 

@@ -1,7 +1,9 @@
 package logging
 
 import (
+	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,14 +14,20 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// FileBodySource stores large log sections as ordered temp-file parts.
+// FileBodySource stores large log sections as buffered, ordered temp-file parts.
 type FileBodySource struct {
 	mu               sync.Mutex
 	dir              string
 	paths            []string
 	cleaned          bool
 	archiveDirectory *logarchive.Directory
+	appendFile       *os.File
+	appendBuffer     *bufio.Writer
+	appendErr        error
+	appendHasContent bool
 }
+
+const logSpoolBufferSize = 32 * 1024
 
 // NewFileBodySourceInDir creates a temp-backed source under baseDir.
 func NewFileBodySourceInDir(baseDir string, prefix string) (*FileBodySource, error) {
@@ -82,6 +90,9 @@ func (s *FileBodySource) CreatePart(prefix string) (*os.File, error) {
 	if s.cleaned {
 		return nil, fmt.Errorf("file body source has been cleaned")
 	}
+	if errFinish := s.finishAppendLocked(); errFinish != nil {
+		return nil, errFinish
+	}
 	prefix = sanitizeTempPrefix(prefix)
 	if errMkdir := os.MkdirAll(s.dir, 0755); errMkdir != nil {
 		return nil, errMkdir
@@ -100,17 +111,29 @@ func (s *FileBodySource) AppendPart(data []byte) error {
 	if len(data) == 0 {
 		return nil
 	}
-	file, errCreate := s.CreatePart("part")
-	if errCreate != nil {
-		return errCreate
+	if s == nil {
+		return fmt.Errorf("file body source is nil")
 	}
-	writeErr := writeLogPart(file, data, false)
-	if errClose := file.Close(); errClose != nil {
-		if writeErr == nil {
-			writeErr = errClose
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Preserve support for a manually removed log directory without creating a
+	// separate file for every event. Raw stream appends avoid this metadata check.
+	if s.appendFile != nil {
+		if _, errStat := os.Stat(s.appendFile.Name()); os.IsNotExist(errStat) {
+			_ = s.appendFile.Close()
+			s.appendFile, s.appendBuffer = nil, nil
+			s.appendHasContent = false
 		}
 	}
-	return writeErr
+	writer, errOpen := s.appendWriterLocked()
+	if errOpen != nil {
+		return errOpen
+	}
+	// WriteTo inserts a newline between physical parts. Add it here instead
+	// when logical events share the same physical part.
+	errWrite := writeLogPart(writer, data, s.appendHasContent)
+	s.appendHasContent = true
+	return errWrite
 }
 
 // AppendBytes appends raw bytes to a single ordered part.
@@ -123,34 +146,73 @@ func (s *FileBodySource) AppendBytes(data []byte) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	writer, errOpen := s.appendWriterLocked()
+	if errOpen != nil {
+		return errOpen
+	}
+	_, errWrite := writer.Write(data)
+	s.appendHasContent = true
+	return errWrite
+}
+
+// appendWriterLocked keeps one descriptor and one bounded buffer per source.
+func (s *FileBodySource) appendWriterLocked() (*bufio.Writer, error) {
 	if s.cleaned {
-		return fmt.Errorf("file body source has been cleaned")
+		return nil, fmt.Errorf("file body source has been cleaned")
+	}
+	if s.appendErr != nil {
+		return nil, s.appendErr
+	}
+	if s.appendFile != nil {
+		return s.appendBuffer, nil
 	}
 	if errMkdir := os.MkdirAll(s.dir, 0755); errMkdir != nil {
-		return errMkdir
+		return nil, errMkdir
 	}
-
 	var file *os.File
 	var errOpen error
 	if len(s.paths) == 0 {
 		file, errOpen = os.CreateTemp(s.dir, "part-*.tmp")
-		if errOpen == nil {
-			s.paths = append(s.paths, file.Name())
-		}
 	} else {
-		file, errOpen = os.OpenFile(s.paths[len(s.paths)-1], os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		file, errOpen = os.OpenFile(s.paths[len(s.paths)-1], os.O_WRONLY|os.O_APPEND, 0600)
+		if os.IsNotExist(errOpen) {
+			file, errOpen = os.CreateTemp(s.dir, "part-*.tmp")
+		}
 	}
 	if errOpen != nil {
-		return errOpen
+		return nil, errOpen
 	}
+	if len(s.paths) == 0 || s.paths[len(s.paths)-1] != file.Name() {
+		s.paths = append(s.paths, file.Name())
+	}
+	info, errStat := file.Stat()
+	if errStat != nil {
+		_ = file.Close()
+		return nil, errStat
+	}
+	s.appendHasContent = info.Size() > 0
+	s.appendFile = file
+	s.appendBuffer = bufio.NewWriterSize(file, logSpoolBufferSize)
+	return s.appendBuffer, nil
+}
 
-	_, writeErr := file.Write(data)
-	if errClose := file.Close(); errClose != nil {
-		if writeErr == nil {
-			writeErr = errClose
-		}
+func (s *FileBodySource) finishAppendLocked() error {
+	if s.appendFile != nil {
+		s.appendErr = errors.Join(s.appendErr, s.appendBuffer.Flush(), s.appendFile.Close())
+		s.appendFile, s.appendBuffer = nil, nil
 	}
-	return writeErr
+	return s.appendErr
+}
+
+// Finish flushes and closes the owned append stream before reading or recovery.
+// External files returned by CreatePart remain the caller's responsibility.
+func (s *FileBodySource) Finish() error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.finishAppendLocked()
 }
 
 // HasPayload reports whether any detail parts were recorded.
@@ -179,6 +241,9 @@ func (s *FileBodySource) Paths() []string {
 func (s *FileBodySource) WriteTo(w io.Writer) (int64, error) {
 	if s == nil || w == nil {
 		return 0, nil
+	}
+	if errFinish := s.Finish(); errFinish != nil {
+		return 0, errFinish
 	}
 	var totalWritten int64
 	paths := s.Paths()
@@ -236,6 +301,7 @@ func (s *FileBodySource) Cleanup() error {
 		s.mu.Unlock()
 		return nil
 	}
+	errFinish := s.finishAppendLocked()
 	paths := make([]string, len(s.paths))
 	copy(paths, s.paths)
 	dir := s.dir
@@ -243,7 +309,7 @@ func (s *FileBodySource) Cleanup() error {
 	s.cleaned = true
 	s.mu.Unlock()
 
-	var firstErr error
+	firstErr := errFinish
 	for _, path := range paths {
 		if errRemove := os.Remove(path); errRemove != nil && !os.IsNotExist(errRemove) && firstErr == nil {
 			firstErr = errRemove
@@ -281,6 +347,9 @@ func recoverFileBodySources(sources ...*FileBodySource) {
 // All producers must have stopped writing before this method is called.
 func (s *FileBodySource) Recover() {
 	if s != nil {
+		if errFinish := s.Finish(); errFinish != nil {
+			log.WithError(errFinish).Warn("failed to flush recovered log source")
+		}
 		s.archiveDirectory.Recover(s.Paths()...)
 	}
 }

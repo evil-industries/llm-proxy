@@ -126,6 +126,80 @@ func TestUploadRejectsDigestMismatchWithoutNetwork(t *testing.T) {
 	}
 }
 
+func TestManagerPreparedUploadRequiresRemoteIntegrity(t *testing.T) {
+	for _, corrupt := range []bool{false, true} {
+		t.Run(fmt.Sprintf("corrupt=%v", corrupt), func(t *testing.T) {
+			var mu sync.Mutex
+			var uploaded []byte
+			store := testStore(t, func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				defer mu.Unlock()
+				w.Header().Set("ETag", `"opaque"`)
+				if r.Method == http.MethodPut {
+					var body io.Reader = r.Body
+					if strings.Contains(r.Header.Get("X-Amz-Content-Sha256"), "STREAMING-AWS4-HMAC-SHA256") {
+						body = httputil.NewChunkedReader(body)
+					}
+					var errRead error
+					uploaded, errRead = io.ReadAll(body)
+					if errRead != nil {
+						t.Error(errRead)
+					}
+					return
+				}
+				body := bytes.Clone(uploaded)
+				if len(body) == 0 {
+					t.Error("verification started before upload")
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+				if corrupt {
+					body[0] ^= 1
+				}
+				w.Header().Set("Content-Length", fmt.Sprint(len(body)))
+				w.Header().Set("Last-Modified", "Mon, 02 Jan 2006 15:04:05 GMT")
+				if r.Method == http.MethodGet {
+					_, _ = w.Write(body)
+				}
+			})
+			dir := t.TempDir()
+			path := filepath.Join(dir, "v1-responses-2026-10-13T180000-prepared.log")
+			original := bytes.Repeat([]byte("complete diagnostic content\n"), 100)
+			worker := &manager{store: store}
+			// Repeat with the same compressor to exercise Reset as well as creation.
+			for i := 0; i < 2; i++ {
+				writeFixture(t, path, original)
+				errArchive := worker.archive(context.Background(), path)
+				if corrupt {
+					if errArchive == nil {
+						t.Fatal("corrupt remote content was accepted")
+					}
+					data, errRead := os.ReadFile(path)
+					if errRead != nil || !bytes.Equal(data, original) {
+						t.Fatalf("failed verification lost original: %v", errRead)
+					}
+				} else if errArchive != nil {
+					t.Fatal(errArchive)
+				} else if _, errStat := os.Stat(path); !os.IsNotExist(errStat) {
+					t.Fatalf("verified source not reclaimed: %v", errStat)
+				}
+				mu.Lock()
+				compressed := bytes.Clone(uploaded)
+				mu.Unlock()
+				reader, errGzip := gzip.NewReader(bytes.NewReader(compressed))
+				if errGzip != nil {
+					t.Fatal(errGzip)
+				}
+				restored, errRead := io.ReadAll(reader)
+				errClose := reader.Close()
+				if errRead != nil || errClose != nil || !bytes.Equal(restored, original) {
+					t.Fatalf("compression changed contents: %v, %v", errRead, errClose)
+				}
+			}
+		})
+	}
+}
+
 func TestArchiveListPaginationAndPrefixIsolation(t *testing.T) {
 	key1 := strings.Repeat("1", 64) + "/first.log.gz"
 	key2 := strings.Repeat("2", 64) + "/second.log.gz"

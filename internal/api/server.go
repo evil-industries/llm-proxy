@@ -22,6 +22,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/api/middleware"
 	codexlive "github.com/router-for-me/CLIProxyAPI/v7/internal/client/codex/live"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/console"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementasset"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/notifications"
@@ -81,7 +82,8 @@ type Server struct {
 	wsAuthEnabled atomic.Bool
 
 	// management handler
-	mgmt *managementHandlers.Handler
+	mgmt    *managementHandlers.Handler
+	console *console.Handler
 
 	// Quota notifications run independently of management browser connections.
 	notifications       *notifications.Service
@@ -263,7 +265,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	// Create HTTP server
 	s.server = &http.Server{
 		Addr:    fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
-		Handler: engine,
+		Handler: s.setupConsole(engine),
 	}
 
 	return s
@@ -394,6 +396,9 @@ func (s *Server) Start() error {
 //   - error: An error if the server fails to stop
 func (s *Server) Stop(ctx context.Context) error {
 	log.Debug("Stopping API server...")
+	if s.console != nil {
+		s.console.Close()
+	}
 	if s.mgmt != nil {
 		// Cancel acquisition promptly; drain background commits below with ctx.
 		s.mgmt.CloseEventStreams()

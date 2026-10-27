@@ -144,6 +144,29 @@ func (s *Store) UploadVerified(ctx context.Context, key, filename string) (err e
 	if _, errSeek := file.Seek(0, io.SeekStart); errSeek != nil {
 		return fmt.Errorf("log archive: rewind completed log: %w", errSeek)
 	}
+	return s.uploadFile(ctx, fullKey, key, file, size, digest)
+}
+
+// uploadPrepared accepts the digest computed by the manager while creating its
+// private, closed staging file. Public UploadVerified still validates its input.
+func (s *Store) uploadPrepared(ctx context.Context, key, filename string, size int64) error {
+	fullKey, errKey := s.fullKey(key)
+	if errKey != nil {
+		return errKey
+	}
+	file, errOpen := os.Open(filename)
+	if errOpen != nil {
+		return fmt.Errorf("log archive: open prepared log: %w", errOpen)
+	}
+	defer closeArchiveReader(file)
+	info, errStat := file.Stat()
+	if errStat != nil || info.Size() != size {
+		return errors.New("log archive: prepared log size changed")
+	}
+	return s.uploadFile(ctx, fullKey, key, file, size, strings.SplitN(key, "/", 2)[0])
+}
+
+func (s *Store) uploadFile(ctx context.Context, fullKey, key string, file *os.File, size int64, digest string) error {
 	_, errPut := s.client.PutObject(ctx, s.bucket, fullKey, file, size, minio.PutObjectOptions{
 		ContentType: "application/gzip", PartSize: 8 * 1024 * 1024, NumThreads: 1,
 		UserMetadata: map[string]string{"sha256": digest},
@@ -155,7 +178,7 @@ func (s *Store) UploadVerified(ctx context.Context, key, filename string) (err e
 	if errRemote != nil {
 		return errRemote
 	}
-	hash.Reset()
+	hash := sha256.New()
 	remoteSize, errRead := copyWithContext(ctx, hash, remote)
 	errClose := remote.Close()
 	if errRead != nil {

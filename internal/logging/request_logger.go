@@ -6,6 +6,7 @@ package logging
 import (
 	"fmt"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
@@ -135,6 +136,8 @@ type StreamingLogWriter interface {
 // FileRequestLogger implements RequestLogger using file-based storage.
 // It provides file-based logging functionality for HTTP requests and responses.
 type FileRequestLogger struct {
+	settingsMu sync.RWMutex
+	preserve   bool
 	// enabled indicates whether request logging is currently enabled.
 	enabled bool
 
@@ -182,6 +185,8 @@ func NewFileRequestLogger(enabled bool, logsDir string, configDir string, errorL
 // Returns:
 //   - bool: True if logging is enabled, false otherwise
 func (l *FileRequestLogger) IsEnabled() bool {
+	l.settingsMu.RLock()
+	defer l.settingsMu.RUnlock()
 	return l.enabled
 }
 
@@ -191,11 +196,15 @@ func (l *FileRequestLogger) IsEnabled() bool {
 // Parameters:
 //   - enabled: Whether request logging should be enabled
 func (l *FileRequestLogger) SetEnabled(enabled bool) {
+	l.settingsMu.Lock()
+	defer l.settingsMu.Unlock()
 	l.enabled = enabled
 }
 
 // SetErrorLogsMaxFiles updates the maximum number of error log files to retain.
 func (l *FileRequestLogger) SetErrorLogsMaxFiles(maxFiles int) {
+	l.settingsMu.Lock()
+	defer l.settingsMu.Unlock()
 	l.errorLogsMaxFiles = maxFiles
 }
 
@@ -208,4 +217,16 @@ func (l *FileRequestLogger) NewFileBodySource(prefix string) (*FileBodySource, e
 		return nil, errEnsure
 	}
 	return newFileBodySourceInDir(l.logsDir, prefix, l.archiveDirectory)
+}
+
+// Snapshot freezes capture settings for an operation that may outlive a reload.
+// Directory ownership remains attached to the originating logger.
+func (l *FileRequestLogger) Snapshot() *FileRequestLogger {
+	l.settingsMu.RLock()
+	defer l.settingsMu.RUnlock()
+	return &FileRequestLogger{
+		enabled: l.enabled, logsDir: l.logsDir, errorLogsMaxFiles: l.errorLogsMaxFiles,
+		homeEnabled: l.homeEnabled, archiveDirectory: l.archiveDirectory,
+		preserve: l.preserve || logarchive.Enabled(),
+	}
 }
