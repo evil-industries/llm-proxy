@@ -7,15 +7,15 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementevents"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/managementevents"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/auth/codex"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/auth/codex"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 )
 
 const deviceTerminalRetention = 30 * time.Minute

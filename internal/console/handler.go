@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementevents"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/managementevents"
 	log "github.com/sirupsen/logrus"
 )
 

@@ -9,14 +9,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/logarchive"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/interfaces"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/logarchive"
 )
 
 const (
 	WebsocketTimelineSourceContextKey    = "WEBSOCKET_TIMELINE_SOURCE"
 	APIRequestSourceContextKey           = "API_REQUEST_SOURCE"
 	DeferredAPIRequestContextKey         = "DEFERRED_API_REQUEST"
+	DeferredAPIResponseContextKey        = "DEFERRED_API_RESPONSE"
 	APIResponseSourceContextKey          = "API_RESPONSE_SOURCE"
 	APIResponseCapturedContextKey        = "API_RESPONSE_CAPTURED"
 	APIWebsocketTimelineSourceContextKey = "API_WEBSOCKET_TIMELINE_SOURCE"
@@ -119,6 +120,9 @@ type StreamingLogWriter interface {
 	// Returns:
 	//   - error: An error if writing fails, nil otherwise
 	WriteAPIWebsocketTimeline(apiWebsocketTimeline []byte) error
+
+	// WriteAPIResponseErrors writes upstream API error entries to the log.
+	WriteAPIResponseErrors(errors []*interfaces.ErrorMessage) error
 
 	// SetFirstChunkTimestamp sets the TTFB timestamp captured when first chunk was received.
 	//

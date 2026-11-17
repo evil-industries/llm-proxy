@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 )
 
 const consoleTestHash = "scrypt$131072$8$1$00112233445566778899aabbccddeeff$d3cec985677cee8d187382f5699004d5303cd0551fbff6c59619d67348416063aae68b723f7bb26779f86db1ed4cf0ebad5555609e9382bb55ec66d53e101942"
