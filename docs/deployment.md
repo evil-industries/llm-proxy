@@ -136,3 +136,14 @@ docker compose down
 Back up configuration and credentials before updates. For the console stack, preserve `frontend/.env`, `frontend/deploy/data/config/`, and the named auth, log, and plugin volumes. `docker compose down` preserves named volumes; `docker compose down --volumes` deletes them. For the root stack, preserve the configured bind-mount directories. Protect logs too: request logging can include prompts and responses.
 
 To update the console stack after checking out the desired revision, run `docker compose up --build -d` from `frontend/`. For the Go-only stack, repeat its build and `up --pull never` commands. Console sessions are held in memory and end when Node restarts; saved provider credentials persist.
+
+## Model catalogs
+
+The model list comes from catalogs embedded in the binary (`internal/registry/models/`). By default the server replaces them at startup, and every three hours, with the official remote catalogs. A model added only to the embedded catalog disappears after that first refresh.
+
+To serve a model that the official catalog does not list yet, choose one:
+
+- Start the server with `--local-model`. It keeps the embedded catalogs and skips remote refreshes.
+- Set `models.catalog` and `models.codex-catalog` in `config.yaml` to absolute file paths or HTTPS URLs of catalogs that include the model.
+
+Check the result with `GET /v1/models`. Once the official catalog lists the model, remove the override to resume automatic catalog updates.
