@@ -34,11 +34,15 @@ func (w *ResponseWriterWrapper) finalizeAfterResponse(c *gin.Context) error {
 		logger: logger.Snapshot(), requestInfo: &info, statusCode: status,
 		headers: w.cloneHeaders(), firstChunkTimestamp: w.firstChunkTimestamp,
 		preserveLogs: w.preservingLogs(), logOnErrorOnly: w.logOnErrorOnly,
+		deferredAPICapture: w.deferredAPICapture, hijacked: w.hijacked, panicked: w.panicked,
 	}
 	// The wrapper remains installed for outer middleware. Detach transferred
-	// capture state so a later response write cannot race with finalization.
+	// capture state so a later response write cannot race with finalization,
+	// and mark it finalized so outer recovery cannot reopen a stream writer.
 	w.body = &bytes.Buffer{}
 	w.chunkChannel, w.streamWriter, w.streamDone = nil, nil, nil
+	w.deferredAPICapture = nil
+	w.finalized = true
 	var request *http.Request
 	if c.Request != nil {
 		ctx := c.Request.Context()
@@ -54,7 +58,7 @@ func (w *ResponseWriterWrapper) finalizeAfterResponse(c *gin.Context) error {
 		requestBodyOverrideContextKey, responseBodyOverrideContextKey, websocketTimelineOverrideContextKey,
 		logging.APIRequestSourceContextKey, logging.APIResponseSourceContextKey,
 		logging.WebsocketTimelineSourceContextKey, logging.APIWebsocketTimelineSourceContextKey,
-		logging.DeferredAPIRequestContextKey,
+		logging.DeferredAPIRequestContextKey, logging.DeferredAPIResponseContextKey,
 	} {
 		if value, exists := c.Get(key); exists {
 			if payload, isBytes := value.([]byte); isBytes {
@@ -63,6 +67,7 @@ func (w *ResponseWriterWrapper) finalizeAfterResponse(c *gin.Context) error {
 			snapshot.Keys[key] = value
 		}
 	}
+	completed.ginContext = snapshot
 	if logging.TryFinalizeRequestLog(func() {
 		if errFinalize := completed.Finalize(snapshot); errFinalize != nil {
 			log.Warn("failed to finalize request log; captured files retained when archival is enabled")

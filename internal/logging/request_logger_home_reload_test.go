@@ -76,7 +76,7 @@ func TestHomeNonStreamingHotEnablePublishesCompleteLocalArchive(t *testing.T) {
 				t.Fatalf("Home forwarding attempts = %d, want one", client.calls)
 			}
 			entries, errRead := os.ReadDir(dir)
-			if errRead != nil || len(entries) != 1 || !strings.HasSuffix(entries[0].Name(), "-reload-home.log") {
+			if errRead != nil || len(entries) != 1 || !strings.HasSuffix(entries[0].Name(), "-"+ShortRequestID("reload-home")+".log") {
 				t.Fatalf("completed local archive = %v, %v", entries, errRead)
 			}
 			content, errRead := os.ReadFile(filepath.Join(dir, entries[0].Name()))

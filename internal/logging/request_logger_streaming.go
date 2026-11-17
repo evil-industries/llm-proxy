@@ -328,7 +328,7 @@ func (w *FileStreamingLogWriter) Close() error {
 			log.Warn("failed to read request log for home; local archive preserved")
 		}
 	}
-	if errRename := os.Rename(logFile.Name(), filepath.Join(w.logsDir, w.logFilename)); errRename != nil {
+	if errRename := publishRequestLogFile(logFile.Name(), filepath.Join(w.logsDir, w.logFilename)); errRename != nil {
 		return fmt.Errorf("failed to publish request log: %w", errRename)
 	}
 	completed = true

@@ -39,7 +39,7 @@ func TestQuotaResetAffinityUsesLastMessageLifetime(t *testing.T) {
 			}
 			pick := func(thread string, auths ...*Auth) string {
 				t.Helper()
-				preferred, candidates, errAvailable := manager.availableAuthsForSelector(selector, auths, "codex", "", current)
+				preferred, candidates, errAvailable := manager.availableAuthsForSelector(context.Background(), selector, auths, "codex", "", current, false)
 				if errAvailable != nil {
 					t.Fatal(errAvailable)
 				}

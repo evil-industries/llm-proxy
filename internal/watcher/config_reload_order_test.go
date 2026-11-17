@@ -65,7 +65,8 @@ func TestImmediateServerUpdateUsesCurrentConfig(t *testing.T) {
 	w := &Watcher{reloadCallback: func(cfg *config.Config) { applied = cfg }}
 	w.SetConfig(currentConfig)
 	w.triggerServerUpdate(oldConfig)
-	if applied != currentConfig {
+	// SetConfig stores a runtime clone, so compare the applied values.
+	if applied == nil || applied.Port != currentConfig.Port {
 		t.Fatal("server update applied a stale captured configuration")
 	}
 }

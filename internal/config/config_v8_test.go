@@ -854,6 +854,7 @@ func TestV8LegacyAddsExplicitZeroRetryOverride(t *testing.T) {
 }
 
 func TestV8LegacyNullRouting(t *testing.T) {
+	// This fork enables session affinity by default.
 	for _, raw := range []string{
 		"port: 8317\nrouting: null\n",
 		"port: 8317\nrouting: ~\n",
@@ -866,7 +867,7 @@ func TestV8LegacyNullRouting(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parse legacy null routing: %v", err)
 			}
-			if cfg.Port != 8317 || !reflect.DeepEqual(cfg.Routing, RoutingConfig{}) {
+			if cfg.Port != 8317 || !reflect.DeepEqual(cfg.Routing, RoutingConfig{SessionAffinity: true}) {
 				t.Fatal("null routing did not preserve default routing")
 			}
 			path := filepath.Join(t.TempDir(), "config.yaml")

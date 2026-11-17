@@ -21,6 +21,10 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// publishRequestLogFile moves a completed pending log to its final name.
+// Tests replace it to simulate publication failures.
+var publishRequestLogFile = os.Rename
+
 var (
 	requestLogID                        atomic.Uint64
 	sanitizeFilenameInvalidCharsPattern = regexp.MustCompile(`[<>:"|?*\s]`)
@@ -214,7 +218,7 @@ func (l *FileRequestLogger) logRequestWithSources(url, method string, requestHea
 		return fmt.Errorf("failed to write log file: %w", writeErr)
 	}
 
-	if errRename := os.Rename(logFile.Name(), filepath.Join(l.logsDir, filename)); errRename != nil {
+	if errRename := publishRequestLogFile(logFile.Name(), filepath.Join(l.logsDir, filename)); errRename != nil {
 		return fmt.Errorf("failed to publish request log: %w", errRename)
 	}
 	completed = true

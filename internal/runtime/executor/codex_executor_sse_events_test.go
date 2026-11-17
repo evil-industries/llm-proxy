@@ -498,6 +498,8 @@ func TestCodexVerifyInferenceTranslatesPayloadAndRequiresCompletedEvent_Issue578
 		FileName: "codex-real-verify.json",
 		Provider: "codex",
 		Status:   cliproxyauth.StatusActive,
+		// A non-first-party base skips this fork's account-info routing gate.
+		Attributes: map[string]string{"base_url": "https://codex.example.test/backend-api/codex"},
 		Metadata: map[string]any{
 			"type":          "codex",
 			"email":         "verify@example.com",

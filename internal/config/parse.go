@@ -22,6 +22,7 @@ func ParseConfigBytes(data []byte) (*Config, error) {
 
 	var cfg Config
 	// Keep defaults aligned with LoadConfigOptional.
+	cfg.Routing.SessionAffinity = true
 	cfg.Host = "" // Default empty: binds to all interfaces (IPv4 + IPv6)
 	cfg.LoggingToFile = false
 	cfg.LogsMaxTotalSizeMB = 0

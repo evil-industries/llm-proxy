@@ -1558,7 +1558,14 @@ func isRepositoryCorruptionError(err error) bool {
 		errors.Is(err, plumbing.ErrObjectNotFound) {
 		return true
 	}
-	return errors.Is(err, fs.ErrNotExist) && err != nil && strings.Contains(err.Error(), "packhandle:")
+	// go-git pack handles can report a missing pack as a wrapped filesystem
+	// error. Restrict this fallback to object packs, not missing worktree files.
+	var pathErr *fs.PathError
+	if !errors.Is(err, fs.ErrNotExist) || !errors.As(err, &pathErr) {
+		return false
+	}
+	path := filepath.ToSlash(filepath.Clean(pathErr.Path))
+	return (strings.HasPrefix(path, "objects/pack/") || strings.Contains(path, "/objects/pack/")) && strings.HasSuffix(path, ".pack")
 }
 
 func verifyRepositoryHead(repo *git.Repository) error {

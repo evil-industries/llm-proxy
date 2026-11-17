@@ -226,6 +226,8 @@ func TestRegisterModelsForAuthBatch_PostBatchReconciliation_Issue6453(t *testing
 		Attributes: map[string]string{
 			"auth_kind": "oauth",
 			"plan_type": "pro",
+			// A non-first-party base skips this fork's account-info routing gate.
+			"base_url": "https://codex.example.test/backend-api/codex",
 		},
 	}
 	if _, errRegister := manager.Register(ctx, auth); errRegister != nil {
@@ -240,6 +242,8 @@ func TestRegisterModelsForAuthBatch_PostBatchReconciliation_Issue6453(t *testing
 		Attributes: map[string]string{
 			"auth_kind": "oauth",
 			"plan_type": "pro",
+			// A non-first-party base skips this fork's account-info routing gate.
+			"base_url": "https://codex.example.test/backend-api/codex",
 		},
 	}
 	if _, errRegister := manager.Register(ctx, allowedAuth); errRegister != nil {

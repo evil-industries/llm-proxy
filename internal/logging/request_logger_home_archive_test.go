@@ -63,7 +63,7 @@ func TestHomeStreamingHotEnablePublishesLocalArchive(t *testing.T) {
 				t.Fatal(errClose)
 			}
 			entries, errRead = os.ReadDir(dir)
-			if errRead != nil || len(entries) != 1 || !strings.HasSuffix(entries[0].Name(), "-hot-home.log") {
+			if errRead != nil || len(entries) != 1 || !strings.HasSuffix(entries[0].Name(), "-"+ShortRequestID("hot-home")+".log") {
 				t.Fatalf("published local logs = %v, %v", entries, errRead)
 			}
 			content, errRead := os.ReadFile(filepath.Join(dir, entries[0].Name()))
@@ -113,7 +113,7 @@ func TestHomeStreamingPreservePropagationActivatesAtClose(t *testing.T) {
 		t.Fatal(errClose)
 	}
 	entries, errRead := os.ReadDir(dir)
-	if errRead != nil || len(entries) != 1 || !strings.HasSuffix(entries[0].Name(), "-close-enable.log") {
+	if errRead != nil || len(entries) != 1 || !strings.HasSuffix(entries[0].Name(), "-"+ShortRequestID("close-enable")+".log") {
 		t.Fatalf("published local logs = %v, %v", entries, errRead)
 	}
 }

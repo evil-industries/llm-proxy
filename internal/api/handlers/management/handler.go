@@ -535,12 +535,11 @@ func (h *Handler) persistLocked(c *gin.Context) bool {
 	return true
 }
 
-// mutateConfig applies change to a private copy under h.reloadMu and h.mu, so a
-// reload publishing h.cfg cannot replace it between the change and the save, and
-// a failed save restores the previous configuration.
+// mutateConfig applies change to a private copy under h.mu, and a failed save
+// restores the previous configuration. It must not take h.reloadMu: the async
+// post-save reload holds it while running hooks, and reload generations already
+// keep a stale reload from replacing a newer save.
 func (h *Handler) mutateConfig(c *gin.Context, change func()) {
-	h.reloadMu.Lock()
-	defer h.reloadMu.Unlock()
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.cfg == nil {

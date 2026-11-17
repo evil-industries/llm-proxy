@@ -40,6 +40,8 @@ func consoleServer(t *testing.T) (*Server, *http.Cookie) {
 	if err := config.SaveConfigPreserveComments(s.configFilePath, s.cfg); err != nil {
 		t.Fatal(err)
 	}
+	// The management handler keeps its own runtime copy of the configuration.
+	s.mgmt.SetConfig(s.cfg)
 	response := consoleRequest(s, "POST", "/api/session", nil, strings.NewReader(`{"password":"a-long-test-password"}`), "application/json")
 	if response.Code != 200 {
 		t.Fatalf("login: %d %s", response.Code, response.Body)
@@ -163,6 +165,7 @@ func TestStaticConsoleRealManagementAndPersistence(t *testing.T) {
 func TestStaticConsoleRealLogsArchivesEventsAndLogout(t *testing.T) {
 	s, cookie := consoleServer(t)
 	s.cfg.LoggingToFile = true
+	s.mgmt.SetConfig(s.cfg)
 	logDir := t.TempDir()
 	s.mgmt.SetLogDirectory(logDir)
 	name := "v1-chat-completions-2026-10-27T120000-fixture.log"

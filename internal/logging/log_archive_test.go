@@ -65,8 +65,8 @@ func TestArchiveFailedPublicationPreservesCapturedSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	paths := source.Paths()
-	// An overlong final filename fails rename after the pending log has been written.
-	err = logger.LogRequestWithOptionsAndAllSources("/v1/responses", "POST", nil, []byte("request body"), 200, nil, []byte("response"), nil, nil, nil, source, nil, nil, nil, nil, nil, false, strings.Repeat("x", 300), time.Now(), time.Time{})
+	// The final rename fails after the pending log has been written.
+	err = logger.LogRequestWithOptionsAndAllSources("/v1/responses", "POST", nil, []byte("request body"), 200, nil, []byte("response"), nil, nil, nil, source, nil, nil, nil, nil, nil, false, failPublicationRequestID(t), time.Now(), time.Time{})
 	if err == nil {
 		t.Fatal("expected publication failure")
 	}
@@ -107,7 +107,7 @@ func TestArchiveStreamingPreservesEveryChunk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) != 1 || !strings.HasSuffix(files[0].Name(), "-stream-id.log") {
+	if len(files) != 1 || !strings.HasSuffix(files[0].Name(), "-"+ShortRequestID("stream-id")+".log") {
 		t.Fatalf("unexpected published files: %v", files)
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, files[0].Name()))
@@ -190,7 +190,7 @@ func TestDisabledArchiveFailedPublicationCleansStaging(t *testing.T) {
 				t.Fatal(err)
 			}
 			if streaming {
-				writer, err := logger.LogStreamingRequest("/v1/responses", "POST", nil, []byte("request"), strings.Repeat("x", 300))
+				writer, err := logger.LogStreamingRequest("/v1/responses", "POST", nil, []byte("request"), failPublicationRequestID(t))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -201,7 +201,7 @@ func TestDisabledArchiveFailedPublicationCleansStaging(t *testing.T) {
 					t.Fatal("expected publication failure")
 				}
 			} else {
-				err = logger.LogRequestWithOptionsAndAllSources("/v1/responses", "POST", nil, []byte("request"), 200, nil, []byte("response"), nil, nil, nil, source, nil, nil, nil, nil, nil, false, strings.Repeat("x", 300), time.Now(), time.Time{})
+				err = logger.LogRequestWithOptionsAndAllSources("/v1/responses", "POST", nil, []byte("request"), 200, nil, []byte("response"), nil, nil, nil, source, nil, nil, nil, nil, nil, false, failPublicationRequestID(t), time.Now(), time.Time{})
 				if err == nil {
 					t.Fatal("expected publication failure")
 				}
@@ -238,7 +238,7 @@ func TestArchiveFailedPublicationUploadsWithoutRestart(t *testing.T) {
 			logger := NewFileRequestLogger(true, dir, "", 10)
 			marker := []byte("full response recovered in the same service session")
 			if streaming {
-				writer, err := logger.LogStreamingRequest("/v1/responses", "POST", nil, []byte("request body"), strings.Repeat("x", 300))
+				writer, err := logger.LogStreamingRequest("/v1/responses", "POST", nil, []byte("request body"), failPublicationRequestID(t))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -247,7 +247,7 @@ func TestArchiveFailedPublicationUploadsWithoutRestart(t *testing.T) {
 					t.Fatal("expected final publication failure")
 				}
 			} else {
-				if err := logger.LogRequest("/v1/responses", "POST", nil, []byte("request body"), 200, nil, marker, nil, nil, nil, nil, nil, strings.Repeat("x", 300), time.Now(), time.Time{}); err == nil {
+				if err := logger.LogRequest("/v1/responses", "POST", nil, []byte("request body"), 200, nil, marker, nil, nil, nil, nil, nil, failPublicationRequestID(t), time.Now(), time.Time{}); err == nil {
 					t.Fatal("expected final publication failure")
 				}
 			}
@@ -344,4 +344,20 @@ func TestFileBodySourceCreatedAfterRetirementKeepsLoggerOwner(t *testing.T) {
 	if source.archiveDirectory != originalOwner || source.archiveDirectory == newLogger.archiveDirectory {
 		t.Fatal("late old-service source acquired new-service ownership")
 	}
+}
+
+// failPublicationRequestID makes the final rename fail for logs of the returned
+// request ID. Request IDs are shortened in file names, so it uses 8 characters.
+func failPublicationRequestID(t *testing.T) string {
+	t.Helper()
+	const requestID = "pubfail0"
+	previous := publishRequestLogFile
+	publishRequestLogFile = func(oldPath, newPath string) error {
+		if strings.HasSuffix(filepath.Base(newPath), "-"+requestID+".log") {
+			return &os.LinkError{Op: "rename", Old: oldPath, New: newPath, Err: os.ErrPermission}
+		}
+		return previous(oldPath, newPath)
+	}
+	t.Cleanup(func() { publishRequestLogFile = previous })
+	return requestID
 }

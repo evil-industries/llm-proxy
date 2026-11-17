@@ -204,7 +204,7 @@ func TestQuotaResetSelectionAcrossStrategies(t *testing.T) {
 				t.Fatal(err)
 			}
 			for range 3 {
-				preferred, candidates, err := m.availableAuthsForSelector(selector, []*Auth{later, sooner}, "codex", "", now)
+				preferred, candidates, err := m.availableAuthsForSelector(context.Background(), selector, []*Auth{later, sooner}, "codex", "", now, false)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -219,7 +219,7 @@ func TestQuotaResetSelectionAcrossStrategies(t *testing.T) {
 				}
 			}
 			sooner.Disabled = true
-			_, candidates, err := m.availableAuthsForSelector(selector, []*Auth{later, sooner}, "codex", "", now)
+			_, candidates, err := m.availableAuthsForSelector(context.Background(), selector, []*Auth{later, sooner}, "codex", "", now, false)
 			if err != nil || len(candidates) != 1 || candidates[0].ID != later.ID {
 				t.Fatalf("disabled selection = %v, %v", candidates, err)
 			}
@@ -285,13 +285,13 @@ func TestQuotaResetRespectsPriorityAndZeroWeight(t *testing.T) {
 	a, b := resetTestAuth("sooner", now, time.Hour), resetTestAuth("later", now, 2*time.Hour)
 	a.Attributes = map[string]string{AttributeWeight: "0"}
 	m := NewManager(nil, &WeightedRoundRobinSelector{}, nil)
-	_, candidates, err := m.availableAuthsForSelector(&WeightedRoundRobinSelector{}, []*Auth{a, b}, "codex", "", now)
+	_, candidates, err := m.availableAuthsForSelector(context.Background(), &WeightedRoundRobinSelector{}, []*Auth{a, b}, "codex", "", now, false)
 	if err != nil || len(candidates) != 1 || candidates[0].ID != b.ID {
 		t.Fatalf("zero-weight candidates = %v, %v", candidates, err)
 	}
 	a.Attributes = map[string]string{"priority": "1"}
 	b.Attributes = map[string]string{"priority": "2"}
-	_, candidates, err = m.availableAuthsForSelector(&RoundRobinSelector{}, []*Auth{a, b}, "codex", "", now)
+	_, candidates, err = m.availableAuthsForSelector(context.Background(), &RoundRobinSelector{}, []*Auth{a, b}, "codex", "", now, false)
 	if err != nil || len(candidates) != 1 || candidates[0].ID != b.ID {
 		t.Fatalf("priority candidates = %v, %v", candidates, err)
 	}
@@ -326,7 +326,7 @@ func TestQuotaResetAffinityNewThreadAndFailover(t *testing.T) {
 	m := NewManager(nil, selector, nil)
 	pick := func(session string) string {
 		t.Helper()
-		preferred, candidates, err := m.availableAuthsForSelector(selector, []*Auth{later, sooner}, "codex", "", now)
+		preferred, candidates, err := m.availableAuthsForSelector(context.Background(), selector, []*Auth{later, sooner}, "codex", "", now, false)
 		if err != nil {
 			t.Fatal(err)
 		}
