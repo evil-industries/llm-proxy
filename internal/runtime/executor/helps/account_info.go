@@ -2,7 +2,6 @@ package helps
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -11,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/MoeForge/moego/json"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 )
 

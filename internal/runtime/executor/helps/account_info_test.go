@@ -1,11 +1,12 @@
 package helps
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/MoeForge/moego/json"
 )
 
 const codexAccountUsageFixture = `{
