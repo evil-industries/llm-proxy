@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"math"
 	"net/url"
-	"regexp"
 	"strings"
+
+	"github.com/MoeForge/moego/regexp"
 )
 
 // NotificationsConfig configures opt-in ntfy quota alerts from the gateway.

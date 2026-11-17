@@ -1,13 +1,14 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/MoeForge/moego/json"
 )
 
 func TestNotificationsDefaultsAndSecretSerialization(t *testing.T) {
