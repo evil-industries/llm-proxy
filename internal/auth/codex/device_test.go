@@ -2,8 +2,6 @@ package codex
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -11,6 +9,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/MoeForge/moego/base64"
+	"github.com/MoeForge/moego/json"
 )
 
 type deviceRoundTrip func(*http.Request) (*http.Response, error)

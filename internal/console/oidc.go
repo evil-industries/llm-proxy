@@ -3,12 +3,12 @@ package console
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"net/http"
 	"net/url"
 	"slices"
 	"time"
 
+	"github.com/MoeForge/moego/base64"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 )

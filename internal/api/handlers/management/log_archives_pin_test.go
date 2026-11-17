@@ -15,7 +15,7 @@ func TestRequestLogKindPinnedCases(t *testing.T) {
 		"v1-responses-2026-10-27T120000-abcd1234.log":       "request",
 		"error-v1-responses-2026-10-27T120000-abcd1234.log": "error",
 		"ünïcode-2026-10-27T120000-a.b_c-d.log":             "request",
-		"nbsp name-2026-10-27T120000-a.log":                 "request",
+		"nbsp\u00a0name-2026-10-27T120000-a.log":            "request",
 		"tab\tname-2026-10-27T120000-a.log":                 "",
 		"space name-2026-10-27T120000-a.log":                "",
 		"v1-2026-13-27T120000-a.log":                        "",

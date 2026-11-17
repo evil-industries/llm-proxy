@@ -3,9 +3,10 @@ package console
 import (
 	"context"
 	"net/http"
-	"regexp"
 	"slices"
 	"time"
+
+	"github.com/MoeForge/moego/regexp"
 )
 
 var statePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{16,256}$`)

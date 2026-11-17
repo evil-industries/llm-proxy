@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/base64"
 	"encoding/hex"
 	"net"
 	"net/http"
@@ -13,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/MoeForge/moego/base64"
 	"golang.org/x/crypto/scrypt"
 )
 

@@ -3,18 +3,18 @@ package console
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
 	"net/http"
 	"net/url"
 	"path"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/MoeForge/moego/json"
+	"github.com/MoeForge/moego/regexp"
 	log "github.com/sirupsen/logrus"
 )
 

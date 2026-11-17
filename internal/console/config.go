@@ -7,8 +7,9 @@ import (
 	"net"
 	"net/url"
 	"path/filepath"
-	"regexp"
 	"strings"
+
+	"github.com/MoeForge/moego/regexp"
 )
 
 type Config struct {

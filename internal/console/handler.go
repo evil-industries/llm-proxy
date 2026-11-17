@@ -2,7 +2,6 @@ package console
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"io/fs"
 	"mime"
@@ -13,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/MoeForge/moego/json"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/managementevents"
 	log "github.com/sirupsen/logrus"

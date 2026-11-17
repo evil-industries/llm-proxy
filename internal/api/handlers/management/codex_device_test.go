@@ -2,8 +2,6 @@ package management
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MoeForge/moego/base64"
+	"github.com/MoeForge/moego/json"
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/auth/codex"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
@@ -82,7 +82,7 @@ func startDeviceTest(t *testing.T, h *Handler, s *testCodexDeviceService) (codex
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if len(response.State) != 43 || response.Status != "pending" || response.UserCode != "ABCD-EFGH" || response.Interval != 5 || w.Header().Get("Cache-Control") != "no-store" {
+	if len(response.State) != 43 || strings.Trim(response.State, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_") != "" || response.Status != "pending" || response.UserCode != "ABCD-EFGH" || response.Interval != 5 || w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("invalid challenge: %+v", response)
 	}
 	<-s.started

@@ -4,8 +4,6 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
-	"encoding/base64"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MoeForge/moego/base64"
+	"github.com/MoeForge/moego/json"
 	"github.com/go-jose/go-jose/v4"
 )
 
