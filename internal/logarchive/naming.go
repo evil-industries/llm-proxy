@@ -2,10 +2,11 @@ package logarchive
 
 import (
 	"math"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/MoeForge/moego/regexp"
 )
 
 var completedRequestPattern = regexp.MustCompile(`^(.+-[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{6}-.+|recovered-.+)\.log(\.gz)?$`)
